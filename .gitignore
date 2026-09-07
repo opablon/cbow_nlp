@@ -1,0 +1,23 @@
+# Archivos y carpetas a ignorar para el repositorio Git
+
+# Entornos virtuales
+.venv/
+env/
+venv/
+
+# Datos del corpus (se mantienen unicamente locales)
+datos/
+
+# Carpeta de respaldos y checkpoints .npz (archivos pesados de pesos)
+respaldos/
+*.npz
+
+# Documentos locales de desarrollo solicitados para ignorar
+rules.md
+bitacora.md
+
+# Archivos de cache de Python y Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/

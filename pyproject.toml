@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tp1_cbow_procesamiento_lenguaje_natural"
+version = "1.0.0"
+description = "Trabajo Practico 1: Redes Neuronales CBOW para Procesamiento de Lenguaje Natural (TUIA - UNAHUR)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "cupy-cuda12x",
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "seaborn",
+    "jupyter",
+    "ipykernel",
+    "tokenizers",
+    "tqdm",
+    "pyyaml",
+]

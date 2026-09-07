@@ -1,0 +1,38 @@
+# Configuracion Centralizada del Modelo CBOW
+
+# Rutas de archivos y carpetas
+ruta_corpus: "datos/corpus_ApAvAu.txt"
+directorio_respaldos: "respaldos"
+
+# MOTOR DE COMPUTO:
+# Elija "cupy" para ejecucion acelerada en CuPy GPU o "pytorch" para ejecucion con PyTorch GPU.
+motor_computo: "cupy"                       # Opciones: "cupy" o "pytorch"
+
+# Parametros de tokenizacion y vocabulario
+estrategia_tokenizacion: "palabra"          # Opciones: "palabra" (regex) o "bpe"
+token_desconocido: "<UNK>"
+
+# SELECCION DE CRITERIO DE VOCABULARIO (MUTUAMENTE EXCLUYENTES):
+# Elija "cantidad" para usar cantidad_palabras_unicas O "porcentaje" para usar porcentaje_palabras_unicas.
+criterio_seleccion_vocabulario: "cantidad" # Opciones: "cantidad" o "porcentaje"
+cantidad_palabras_unicas: 15000            # Se activa si criterio_seleccion_vocabulario: "cantidad"
+porcentaje_palabras_unicas: 0.80           # Se activa si criterio_seleccion_vocabulario: "porcentaje" (0.0 a 1.0)
+frecuencia_minima: 1                        # Frecuencia minima para conservar una palabra en el diccionario
+
+# Hiperparametros del modelo CBOW
+tamanio_ventana: 4                         # Cantidad de palabras a izquierda y derecha (W=4 o W=5)
+dimension_embedding: 100                   # Dimension de la capa oculta N (vector de embedding)
+tasa_aprendizaje: 0.025                    # Tasa de aprendizaje eta
+cantidad_epocas: 100                       # Numero de epocas de entrenamiento E
+frecuencia_respaldo: 10                     # Guardar backup .npz cada K epocas
+
+# REGLA GENERAL PARA SELECCIONAR tamanio_lote SEGUN LA VRAM DE LA GPU:
+# - GPUs de entrada (4 GB - 6 GB VRAM): tamanio_lote = 1024 a 2048
+# - GPUs gama media/alta (8 GB - 16 GB+ VRAM): tamanio_lote = 4096 a 8192
+# - Servidores/Colab (T4, A100): tamanio_lote = 8192 a 16384
+# Regla: Ajustar tamanio_lote en potencias de 2 (2^k) maximizando el uso de VRAM sin producir Out Of Memory (OOM).
+tamanio_lote: 2048
+
+# Evaluacion de similaridad
+tipo_similaridad: "producto_interno"        # Opciones: "producto_interno" (default) o "coseno"
+semilla_aleatoria: 26
