@@ -24,6 +24,7 @@ class EntrenadorCbow:
         modelo,
         tasa_aprendizaje: float = 0.025,
         directorio_respaldos: str = "respaldos",
+        hacer_respaldo: bool = True,
         frecuencia_respaldo: int = 2,
     ):
         """
@@ -31,11 +32,13 @@ class EntrenadorCbow:
         :param modelo: Instancia del modelo ModeloCbowCuPy o ModeloCbowPyTorch.
         :param tasa_aprendizaje: Tasa de aprendizaje eta para la actualizacion de pesos.
         :param directorio_respaldos: Directorio donde almacenar los checkpoints .npz.
+        :param hacer_respaldo: Booleano para activar o desactivar el guardado de checkpoints.
         :param frecuencia_respaldo: Cantidad de epocas entre cada backup.
         """
         self.modelo = modelo
         self.tasa_aprendizaje = tasa_aprendizaje
         self.directorio_respaldos = Path(directorio_respaldos)
+        self.hacer_respaldo = hacer_respaldo
         self.frecuencia_respaldo = frecuencia_respaldo
         self.historial_perdida = []
         self.epoca_actual_cargada = 0
@@ -164,8 +167,8 @@ class EntrenadorCbow:
                 f"Tiempo: {duracion_epoca:.2f}s ({velocidad:,.1f} muestras/s)"
             )
 
-            # Autoguardado de respaldos periodicos (previene ZeroDivisionError si frecuencia_respaldo es 0)
-            if (self.frecuencia_respaldo > 0 and epoca % self.frecuencia_respaldo == 0) or epoca == cantidad_epocas:
+            # Autoguardado de respaldos periodicos (requiere hacer_respaldo True y frecuencia_respaldo > 0)
+            if self.hacer_respaldo and self.frecuencia_respaldo > 0 and (epoca % self.frecuencia_respaldo == 0 or epoca == cantidad_epocas):
                 ruta_backup = (
                     self.directorio_respaldos
                     / f"modelo_cbow_w{tamanio_ventana}_epoca_{epoca}.npz"

@@ -30,6 +30,7 @@ class Configuracion:
         self.dimension_embedding = 100
         self.tasa_aprendizaje = 0.025
         self.cantidad_epocas = 10
+        self.hacer_respaldo = True
         self.frecuencia_respaldo = 2
         self.tamanio_lote = 2048
         self.tipo_similaridad = "producto_interno"
@@ -67,6 +68,7 @@ class Configuracion:
         diccionario_parametros["dimension_embedding"] = self.dimension_embedding
         diccionario_parametros["tasa_aprendizaje"] = self.tasa_aprendizaje
         diccionario_parametros["cantidad_epocas"] = self.cantidad_epocas
+        diccionario_parametros["hacer_respaldo"] = self.hacer_respaldo
         diccionario_parametros["frecuencia_respaldo"] = self.frecuencia_respaldo
         diccionario_parametros["tamanio_lote"] = self.tamanio_lote
         diccionario_parametros["tipo_similaridad"] = self.tipo_similaridad
