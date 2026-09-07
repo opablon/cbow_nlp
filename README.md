@@ -38,8 +38,8 @@ uv pip install -e .
 ## 📁 Estructura del Repositorio Sincronizado
 
 ```text
-tp_1_proyecto/
-├── README.md                                # Instrucciones de clonacion, instalacion y uso
+cbow_nlp/
+├── README.md                               # Instrucciones de clonacion, instalacion y uso
 ├── pyproject.toml                          # Dependencias del proyecto para uv
 ├── configuracion.yaml                      # Hiperparametros centralizados por defecto
 ├── TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb  # Notebook Master Interactivo
