@@ -188,15 +188,28 @@ class ModeloCbowPyTorch(clase_base):
 
         pesos_entrada_np = self.capa_embedding.weight.detach().cpu().numpy()
         pesos_salida_np = self.capa_salida.weight.detach().cpu().numpy().T # Transpuesto para coincidir con CuPy (N x |V|)
+        dist_unigrama_np = (
+            self.distribucion_unigrama.detach().cpu().numpy()
+            if hasattr(self, "distribucion_unigrama") and self.distribucion_unigrama is not None
+            else None
+        )
+
+        datos_guardar = {
+            "matriz_pesos_entrada": pesos_entrada_np,
+            "matriz_pesos_salida": pesos_salida_np,
+            "epoca_actual": epoca_actual,
+            "historial_perdida": np.array(historial_perdida),
+            "tamanio_vocabulario": self.tamanio_vocabulario,
+            "dimension_embedding": self.dimension_embedding,
+            "muestreo_negativo": self.muestreo_negativo,
+            "cantidad_muestras_negativas": self.cantidad_muestras_negativas,
+        }
+        if dist_unigrama_np is not None:
+            datos_guardar["distribucion_unigrama"] = dist_unigrama_np
 
         np.savez_compressed(
             ruta_archivo,
-            matriz_pesos_entrada=pesos_entrada_np,
-            matriz_pesos_salida=pesos_salida_np,
-            epoca_actual=epoca_actual,
-            historial_perdida=np.array(historial_perdida),
-            tamanio_vocabulario=self.tamanio_vocabulario,
-            dimension_embedding=self.dimension_embedding,
+            **datos_guardar
         )
         print(f"Backup PyTorch guardado exitosamente en: {ruta_archivo}")
 
@@ -221,5 +234,17 @@ class ModeloCbowPyTorch(clase_base):
         for valor in datos["historial_perdida"]:
             historial_perdida.append(float(valor))
 
-        print(f"Modelo PyTorch cargado desde {ruta_archivo}. Epoca reanudada: {epoca_actual}")
+        if "tamanio_vocabulario" in datos:
+            self.tamanio_vocabulario = int(datos["tamanio_vocabulario"])
+        if "dimension_embedding" in datos:
+            self.dimension_embedding = int(datos["dimension_embedding"])
+        if "muestreo_negativo" in datos:
+            self.muestreo_negativo = bool(datos["muestreo_negativo"])
+        if "cantidad_muestras_negativas" in datos:
+            self.cantidad_muestras_negativas = int(datos["cantidad_muestras_negativas"])
+        if "distribucion_unigrama" in datos:
+            self.distribucion_unigrama = torch.from_numpy(datos["distribucion_unigrama"]).float().to(dispositivo_torch)
+
+        print(f"Modelo PyTorch cargado desde {ruta_archivo}. Epoca reanudada: {epoca_actual} (Muestreo Negativo: {self.muestreo_negativo})")
         return epoca_actual, historial_perdida
+

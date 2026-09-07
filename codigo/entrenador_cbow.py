@@ -210,3 +210,16 @@ class EntrenadorCbow:
             cantidad_epocas=cantidad_epocas_total,
             epoca_inicial=epoca_inicial,
         )
+
+    def cargar_respaldo(self, ruta_backup: Path | str) -> tuple[int, list[float]]:
+        """
+        Carga el estado del modelo y sincroniza la epoca_actual_cargada e historial_perdida del entrenador.
+        :param ruta_backup: Ruta al archivo .npz de respaldo.
+        :return: Tupla (epoca_cargada, historial_perdida).
+        """
+        ruta = Path(ruta_backup)
+        epoca_cargada, historial = self.modelo.cargar_modelo(ruta)
+        self.epoca_actual_cargada = epoca_cargada
+        self.historial_perdida = list(historial)
+        return epoca_cargada, historial
+

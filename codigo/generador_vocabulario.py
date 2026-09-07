@@ -3,8 +3,10 @@ Modulo para la construccion del vocabulario y mapeos de palabras a indices.
 Soporta seleccion aleatoria directa con semilla reproducible y seleccion mutuamente excluyente de tamaño de diccionario.
 """
 
+import json
 import random
 from collections import Counter
+from pathlib import Path
 
 
 class GeneradorVocabulario:
@@ -161,3 +163,43 @@ class GeneradorVocabulario:
             probabilidades = probabilidades / suma_total
 
         return probabilidades
+
+    def guardar_vocabulario(self, ruta_archivo: Path | str) -> None:
+        """
+        Guarda la estructura completa del vocabulario y sus frecuencias en un archivo JSON.
+        :param ruta_archivo: Ruta donde almacenar el archivo JSON.
+        """
+        ruta = Path(ruta_archivo)
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+
+        datos = {
+            "token_desconocido": self.token_desconocido,
+            "palabra_a_indice": self.palabra_a_indice,
+            "frecuencias_palabras": dict(self.frecuencias_palabras),
+            "tamanio_vocabulario": self.tamanio_vocabulario,
+        }
+
+        with open(ruta, "w", encoding="utf-8") as archivo:
+            json.dump(datos, archivo, ensure_ascii=False, indent=2)
+        print(f"Vocabulario guardado exitosamente en: {ruta}")
+
+    def cargar_vocabulario(self, ruta_archivo: Path | str) -> None:
+        """
+        Carga la estructura del vocabulario y sus frecuencias desde un archivo JSON.
+        :param ruta_archivo: Ruta al archivo JSON de vocabulario.
+        """
+        ruta = Path(ruta_archivo)
+        with open(ruta, "r", encoding="utf-8") as archivo:
+            datos = json.load(archivo)
+
+        self.token_desconocido = datos.get("token_desconocido", "<UNK>")
+        self.palabra_a_indice = datos["palabra_a_indice"]
+
+        self.indice_a_palabra = {}
+        for palabra, idx in self.palabra_a_indice.items():
+            self.indice_a_palabra[int(idx)] = palabra
+
+        self.frecuencias_palabras = Counter(datos.get("frecuencias_palabras", {}))
+        self.tamanio_vocabulario = len(self.palabra_a_indice)
+        print(f"Vocabulario cargado exitosamente desde {ruta}. Tamanio total: {self.tamanio_vocabulario} tokens.")
+
