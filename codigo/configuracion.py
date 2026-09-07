@@ -72,3 +72,20 @@ class Configuracion:
         diccionario_parametros["tipo_similaridad"] = self.tipo_similaridad
         diccionario_parametros["semilla_aleatoria"] = self.semilla_aleatoria
         return diccionario_parametros
+
+    def guardar_en_yaml(self, ruta_yaml: Path | str | None = None) -> None:
+        """
+        Exporta los parametros actuales de la instancia a un archivo YAML de forma segura.
+        Si no se especifica ruta_yaml, utiliza self.ruta_configuracion o 'configuracion.yaml'.
+        """
+        if ruta_yaml is not None:
+            destino = Path(ruta_yaml)
+        elif hasattr(self, "ruta_configuracion") and self.ruta_configuracion is not None:
+            destino = Path(self.ruta_configuracion)
+        else:
+            destino = Path("configuracion.yaml")
+
+        datos = self.a_diccionario()
+        with open(destino, "w", encoding="utf-8") as archivo:
+            yaml.safe_dump(datos, archivo, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
