@@ -14,8 +14,8 @@ El proyecto utiliza el gestor de paquetes de alto rendimiento **`uv`**.
 
 ### 1. Clonar el Repositorio
 ```bash
-git clone <URL_DE_TU_REPOSITORIO_GITHUB>
-cd tp_1_proyecto
+git clone https://github.com/opablon/cbow_nlp.git
+cd cbow_nlp
 ```
 
 ### 2. Crear e Instalar el Entorno Virtual
@@ -38,8 +38,8 @@ uv pip install -e .
 ## 📁 Estructura del Repositorio Sincronizado
 
 ```text
-tp_1_proyecto/
-├── README.md                                # Instrucciones de clonacion, instalacion y uso
+cbow_nlp/
+├── README.md                               # Instrucciones de clonacion, instalacion y uso
 ├── pyproject.toml                          # Dependencias del proyecto para uv
 ├── configuracion.yaml                      # Hiperparametros centralizados por defecto
 ├── TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb  # Notebook Master Interactivo
