@@ -47,6 +47,11 @@ class EvaluadorSimilaridad:
 
         # Matriz completa de embeddings W (|V| x N)
         matriz_W = self.modelo.matriz_pesos_entrada
+
+        # Conversión adaptativa si matriz_W es un Tensor de PyTorch
+        if hasattr(matriz_W, "detach"):
+            matriz_W = xp.asarray(matriz_W.detach().cpu().numpy())
+
         vector_palabra = matriz_W[indice_objetivo, :]
 
         if tipo_similaridad == "producto_interno":
