@@ -190,12 +190,12 @@ class ModeloCbowCuPy:
             # Gradientes respecto a W':
             g_pos = (sigma_pos - 1.0)[:, None]  # (B, 1)
             grad_W_pos = (tasa_aprendizaje / B) * (g_pos * vector_oculto_h)  # (B, N)
-            xp.add.at(pesos_salida_T, indices_palabra_objetivo_batch, grad_W_pos)
+            xp.add.at(pesos_salida_T, indices_palabra_objetivo_batch, -grad_W_pos)
 
             g_neg = (1.0 - sigma_neg_inv)[:, :, None]  # (B, K, 1) -> sigma(u)
             grad_W_neg = (tasa_aprendizaje / B) * (g_neg * vector_oculto_h[:, None, :]).reshape(-1, self.dimension_embedding)
             indices_neg_flat = indices_negativos.ravel()
-            xp.add.at(pesos_salida_T, indices_neg_flat, grad_W_neg)
+            xp.add.at(pesos_salida_T, indices_neg_flat, -grad_W_neg)
 
             # Error retropropagado a la capa oculta EH: (B, N)
             vector_error_oculto_EH = g_pos * W_pos + xp.sum(g_neg * W_neg, axis=1)
