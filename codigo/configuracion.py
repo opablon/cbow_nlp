@@ -15,7 +15,7 @@ class Configuracion:
         :param ruta_configuracion: Ruta al archivo YAML (o None para omitir carga externa).
         """
         # Valores por defecto en Python
-        self.ruta_corpus = "datos/corpus_ApAvAu.txt"
+        self.ruta_corpus = "datos/corpus.txt"
         self.directorio_respaldos = "respaldos"
         self.motor_computo = "cupy"  # "cupy" o "pytorch"
         self.estrategia_tokenizacion = "palabra"
@@ -24,6 +24,8 @@ class Configuracion:
         self.cantidad_palabras_unicas = 15000
         self.porcentaje_palabras_unicas = 0.80
         self.frecuencia_minima = 1
+        self.muestreo_negativo = False
+        self.cantidad_muestras_negativas = 5
         self.tamanio_ventana = 4
         self.dimension_embedding = 100
         self.tasa_aprendizaje = 0.025
@@ -59,6 +61,8 @@ class Configuracion:
         diccionario_parametros["cantidad_palabras_unicas"] = self.cantidad_palabras_unicas
         diccionario_parametros["porcentaje_palabras_unicas"] = self.porcentaje_palabras_unicas
         diccionario_parametros["frecuencia_minima"] = self.frecuencia_minima
+        diccionario_parametros["muestreo_negativo"] = self.muestreo_negativo
+        diccionario_parametros["cantidad_muestras_negativas"] = self.cantidad_muestras_negativas
         diccionario_parametros["tamanio_ventana"] = self.tamanio_ventana
         diccionario_parametros["dimension_embedding"] = self.dimension_embedding
         diccionario_parametros["tasa_aprendizaje"] = self.tasa_aprendizaje

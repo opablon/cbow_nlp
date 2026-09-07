@@ -55,35 +55,55 @@ class ModeloCbowCuPy:
         tamanio_vocabulario: int,
         dimension_embedding: int = 100,
         semilla_aleatoria: int = 26,
+        muestreo_negativo: bool = False,
+        cantidad_muestras_negativas: int = 5,
+        distribucion_unigrama: xp.ndarray | None = None,
     ):
         """
         Inicializa las matrices de pesos W y W' en la GPU o CPU.
         :param tamanio_vocabulario: Cardinalidad del vocabulario |V|.
         :param dimension_embedding: Numero de neuronas en la capa oculta N.
         :param semilla_aleatoria: Semilla para reproducibilidad (por defecto 26).
+        :param muestreo_negativo: Si es True, activa el Muestreo Negativo (Negative Sampling).
+        :param cantidad_muestras_negativas: Cantidad de muestras negativas K por elemento.
+        :param distribucion_unigrama: Arreglo de probabilidad unigrama P(w)^0.75 para muestras negativas.
         """
         self.tamanio_vocabulario = tamanio_vocabulario
         self.dimension_embedding = dimension_embedding
+        self.muestreo_negativo = muestreo_negativo
+        self.cantidad_muestras_negativas = cantidad_muestras_negativas
 
         xp.random.seed(semilla_aleatoria)
 
         # Matriz W de entrada (|V| x N): cada fila corresponde a la representacion de una palabra
-        # Forma: (|V|, N)
         limite = 0.5 / dimension_embedding
         self.matriz_pesos_entrada = xp.random.uniform(
             -limite, limite, (tamanio_vocabulario, dimension_embedding)
         ).astype(xp.float32)
 
-        # Matriz W' de salida (N x |V|): cada columna corresponde a los pesos hacia la palabra predicha
-        # Forma: (N, |V|)
-        self.matriz_pesos_salida = xp.zeros(
-            (dimension_embedding, tamanio_vocabulario), dtype=xp.float32
-        )
+        # Matriz W' de salida (N x |V|):
+        # Softmax: Inicializado en cero absoluto (especificacion clasica).
+        # Negative Sampling: Inicializado aleatorio uniforme en [-0.5/N, 0.5/N] para romper simetria.
+        if self.muestreo_negativo:
+            self.matriz_pesos_salida = xp.random.uniform(
+                -limite, limite, (dimension_embedding, tamanio_vocabulario)
+            ).astype(xp.float32)
+        else:
+            self.matriz_pesos_salida = xp.zeros(
+                (dimension_embedding, tamanio_vocabulario), dtype=xp.float32
+            )
+
+        # Preparar distribucion de probabilidad unigrama en GPU/CPU
+        if distribucion_unigrama is not None:
+            self.distribucion_unigrama = xp.asarray(distribucion_unigrama, dtype=xp.float32)
+        else:
+            prob_uniforme = np.ones(tamanio_vocabulario, dtype=np.float32) / tamanio_vocabulario
+            self.distribucion_unigrama = xp.asarray(prob_uniforme, dtype=xp.float32)
 
     def propagar_hacia_adelante(self, indices_contexto_batch: xp.ndarray) -> tuple:
         """
         Propagacion hacia adelante vectorizada por lotes para B muestras.
-        Calcula el vector promedio de la capa oculta h, las activaciones lineales u y la salida Softmax y.
+        Calcula el vector promedio de la capa oculta h, las activaciones lineales u y la salida Softmax y (si aplica).
         :param indices_contexto_batch: Arreglo de indices de contexto de forma (B, C) donde C = 2 * W.
         :return: Tupla (vector_oculto_h, activacion_lineal_u, probabilidades_y).
         """
@@ -92,26 +112,21 @@ class ModeloCbowCuPy:
 
         # h es el promedio de las filas de W correspondientes a los indices del contexto
         # h = (1 / C) * sum_{c=1}^C W[I_c, :]^T
-        # Forma de vectores_contexto: (B, C, N)
         vectores_contexto = self.matriz_pesos_entrada[indices_contexto_batch]
-
-        # Forma de vector_oculto_h: (B, N)
         vector_oculto_h = xp.mean(vectores_contexto, axis=1)
 
+        if self.muestreo_negativo:
+            # En Muestreo Negativo se omite la Softmax global masiva O(|V|)
+            return vector_oculto_h, None, None
+
         # u = h * W' (Activacion lineal no normalizada de la capa de salida)
-        # Forma de activacion_lineal_u: (B, |V|)
         activacion_lineal_u = xp.dot(vector_oculto_h, self.matriz_pesos_salida)
 
-        # Estabilizacion numerica para el calculo de Softmax por lote:
-        # Se resta el valor maximo de cada muestra max(activacion_lineal_u) antes de exponencializar
-        # para evitar el desbordamiento numerico (overflow) al calcular e^x en coma flotante.
-        # Forma de activacion_estabilizada: (B, |V|)
+        # Softmax estabilizada numericante
         activacion_estabilizada = activacion_lineal_u - xp.max(
             activacion_lineal_u, axis=1, keepdims=True
         )
         exponenciales = xp.exp(activacion_estabilizada)
-
-        # Forma de probabilidades_y: (B, |V|)
         probabilidades_y = exponenciales / xp.sum(exponenciales, axis=1, keepdims=True)
 
         return vector_oculto_h, activacion_lineal_u, probabilidades_y
@@ -121,54 +136,100 @@ class ModeloCbowCuPy:
         indices_contexto_batch: xp.ndarray,
         indices_palabra_objetivo_batch: xp.ndarray,
         vector_oculto_h: xp.ndarray,
-        probabilidades_y: xp.ndarray,
+        probabilidades_y: xp.ndarray | None,
         tasa_aprendizaje: float,
     ) -> float:
         """
-        Calcula los gradientes vectoriales por lote y actualiza las matrices W' y W a máxima velocidad en la GPU.
-        :param indices_contexto_batch: Arreglo de indices de contexto de forma (B, C).
-        :param indices_palabra_objetivo_batch: Arreglo de indices objetivo de forma (B,).
-        :param vector_oculto_h: Vector promedio de la capa oculta h de forma (B, N).
-        :param probabilidades_y: Vector de probabilidades Softmax y de forma (B, |V|).
-        :param tasa_aprendizaje: Tasa de aprendizaje eta.
-        :return: Valor de la perdida promedio del lote.
+        Calcula los gradientes vectoriales por lote y actualiza W' y W sin bucles 'for' en Python.
         """
         B, C = indices_contexto_batch.shape
 
-        # Calculo de la perdida promedio del lote: E = -log(y_O)
-        # Se utiliza el valor 1e-12 para evitar indeterminacion matematica por logaritmo de cero (-infinito)
-        # Forma de probabilidades_objetivo: (B,)
+        if self.muestreo_negativo:
+            K = self.cantidad_muestras_negativas
+            
+            # Muestreo de K palabras negativas por cada muestra del lote
+            indices_negativos = xp.random.choice(
+                self.tamanio_vocabulario,
+                size=(B, K),
+                p=self.distribucion_unigrama,
+            )
+
+            # Salvaguarda Teorica: Excluir activamente el objetivo positivo del conjunto de negativos
+            mascara_colision = (indices_negativos == indices_palabra_objetivo_batch[:, None])
+            while float(xp.sum(mascara_colision)) > 0:
+                num_colisiones = int(xp.sum(mascara_colision))
+                nuevos_negativos = xp.random.choice(
+                    self.tamanio_vocabulario,
+                    size=num_colisiones,
+                    p=self.distribucion_unigrama,
+                )
+                indices_negativos[mascara_colision] = nuevos_negativos
+                mascara_colision = (indices_negativos == indices_palabra_objetivo_batch[:, None])
+
+            # W'_salida transpuesto es (|V|, N)
+            pesos_salida_T = self.matriz_pesos_salida.T
+            
+            # Pesos de palabras positivas: (B, N)
+            W_pos = pesos_salida_T[indices_palabra_objetivo_batch]
+            
+            # Pesos de palabras negativas: (B, K, N)
+            W_neg = pesos_salida_T[indices_negativos]
+
+            # u_pos = h * W'_pos: (B,)
+            u_pos = xp.sum(vector_oculto_h * W_pos, axis=1)
+            sigma_pos = 1.0 / (1.0 + xp.exp(-u_pos))
+            loss_pos = -xp.log(xp.maximum(sigma_pos, 1e-12))
+
+            # u_neg = h * W'_neg: (B, K)
+            u_neg = xp.sum(vector_oculto_h[:, None, :] * W_neg, axis=2)
+            sigma_neg_inv = 1.0 / (1.0 + xp.exp(u_neg)) # sigma(-u)
+            loss_neg = -xp.log(xp.maximum(sigma_neg_inv, 1e-12))
+
+            perdida_promedio = float(xp.mean(loss_pos + xp.sum(loss_neg, axis=1)))
+
+            # Gradientes respecto a W':
+            g_pos = (sigma_pos - 1.0)[:, None]  # (B, 1)
+            grad_W_pos = (tasa_aprendizaje / B) * (g_pos * vector_oculto_h)  # (B, N)
+            xp.add.at(pesos_salida_T, indices_palabra_objetivo_batch, grad_W_pos)
+
+            g_neg = (1.0 - sigma_neg_inv)[:, :, None]  # (B, K, 1) -> sigma(u)
+            grad_W_neg = (tasa_aprendizaje / B) * (g_neg * vector_oculto_h[:, None, :]).reshape(-1, self.dimension_embedding)
+            indices_neg_flat = indices_negativos.ravel()
+            xp.add.at(pesos_salida_T, indices_neg_flat, grad_W_neg)
+
+            # Error retropropagado a la capa oculta EH: (B, N)
+            vector_error_oculto_EH = g_pos * W_pos + xp.sum(g_neg * W_neg, axis=1)
+
+            # Actualizacion vectorizada de W (entrada) sin bucles Python
+            delta_entrada = (tasa_aprendizaje / (B * C)) * vector_error_oculto_EH
+            indices_flat = indices_contexto_batch.ravel()
+            delta_repetida = xp.repeat(delta_entrada, C, axis=0)
+            xp.add.at(self.matriz_pesos_entrada, indices_flat, -delta_repetida)
+
+            return perdida_promedio
+
+        # --- Softmax Completa ---
         probabilidades_objetivo = probabilidades_y[
             xp.arange(B), indices_palabra_objetivo_batch
         ]
         probabilidades_estables = xp.maximum(probabilidades_objetivo, 1e-12)
         perdida_promedio = float(-xp.mean(xp.log(probabilidades_estables)))
 
-        # Vector de error de salida por lote: e_{b, j} = y_{b, j} - t_{b, j}
-        # Se utiliza .copy() para crear una copia independiente en memoria y no mutar por referencia
-        # el arreglo original probabilidades_y que podria requerirse posteriormente sin modificaciones.
-        # Forma de vector_error_salida: (B, |V|)
         vector_error_salida = probabilidades_y.copy()
         vector_error_salida[xp.arange(B), indices_palabra_objetivo_batch] -= 1.0
 
-        # Actualizacion matricial vectorizada para W' (N x |V|):
-        # Gradiente promedio sobre el lote: (1 / B) * h^T * e
-        # Forma de gradiente_W_prima: (N, |V|)
+        # Actualizacion W'
         gradiente_W_prima = xp.dot(vector_oculto_h.T, vector_error_salida) / B
         self.matriz_pesos_salida -= tasa_aprendizaje * gradiente_W_prima
 
-        # Error retropropagado a la capa oculta: E_H = e * W'^T
-        # Forma de vector_error_oculto_EH: (B, N)
+        # Error en capa oculta EH: (B, N)
         vector_error_oculto_EH = xp.dot(vector_error_salida, self.matriz_pesos_salida.T)
 
-        # Actualizacion matricial vectorizada para W (|V| x N):
-        # Forma de delta_entrada: (B, N)
+        # Actualizacion vectorizada de W (entrada) sin bucles Python
         delta_entrada = (tasa_aprendizaje / (B * C)) * vector_error_oculto_EH
-
-        # Aplicar actualizacion sobre las filas correspondientes al contexto de cada muestra
-        for col_c in range(C):
-            indices_columna = indices_contexto_batch[:, col_c]  # Forma: (B,)
-            xp.add.at(self.matriz_pesos_entrada, indices_columna, -delta_entrada)
+        indices_flat = indices_contexto_batch.ravel()
+        delta_repetida = xp.repeat(delta_entrada, C, axis=0)
+        xp.add.at(self.matriz_pesos_entrada, indices_flat, -delta_repetida)
 
         return perdida_promedio
 

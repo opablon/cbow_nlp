@@ -14,8 +14,8 @@ El proyecto utiliza el gestor de paquetes de alto rendimiento **`uv`**.
 
 ### 1. Clonar el Repositorio
 ```bash
-git clone <URL_DE_TU_REPOSITORIO_GITHUB>
-cd tp_1_proyecto
+git clone https://github.com/opablon/cbow_nlp.git
+cd cbow_nlp
 ```
 
 ### 2. Crear e Instalar el Entorno Virtual
@@ -67,8 +67,8 @@ Todos los parámetros del proyecto (ruta del corpus, motor de cómputo, tamaño 
 
 ### 1. Selección de Fuente del Corpus de Texto
 Para entrenar el modelo con tu propio corpus de texto o con el archivo provisto por la cátedra:
-1. Coloca tu archivo de texto (por ejemplo `corpus_ApAvAu.txt`) dentro de la carpeta `datos/` (o en la ubicación deseada).
-2. Modifica la variable `config.ruta_corpus = "datos/tu_corpus.txt"` en la **Sección 1** del Notebook (o en `configuracion.yaml`).
+1. Coloca tu archivo de texto (por ejemplo `corpus.txt`) dentro de la carpeta `datos/` (o en la ubicación deseada).
+2. Modifica la variable `config.ruta_corpus = "datos/corpus.txt"` en la **Sección 1** del Notebook (o en `configuracion.yaml`).
 
 ### 2. Motores de Cómputo Disponibles (`motor_computo`)
 Puedes alternar entre dos motores de ejecución acelerada por GPU NVIDIA modificando el parámetro `motor_computo` en `configuracion.yaml` o directamente en el notebook:
@@ -77,7 +77,14 @@ Puedes alternar entre dos motores de ejecución acelerada por GPU NVIDIA modific
 
 Ambos motores de cómputo están 100% implementados y permiten entrenar el modelo CBOW a máxima velocidad en GPU NVIDIA.
 
-### 3. Regla General para Seleccionar `tamanio_lote` (Batch Size)
+### 3. Optimización por Muestreo Negativo (Negative Sampling)
+Puedes activar la optimización mediante Muestreo Negativo modificando los parámetros en `configuracion.yaml` o en el Notebook:
+- `muestreo_negativo: true` (por defecto `false` para Softmax Completa).
+- `cantidad_muestras_negativas: 5` ($K=5$ muestras negativas extraídas sobre la distribución $U^{3/4} \propto f(w)^{0.75}$).
+- **Ventaja de Rendimiento**: Reduce el costo computacional de $O(|V|)$ a $O(K)$, permitiendo acelerar drásticamente el tiempo de convergencia.
+- **Inicialización de Pesos**: Con Softmax se inicializa $W'$ en ceros; con Muestreo Negativo se inicializa $W'$ de forma aleatoria uniforme en `[-0.5/N, 0.5/N]` para romper la simetría de las sigmoides logísticas.
+
+### 4. Regla General para Seleccionar `tamanio_lote` (Batch Size)
 El tamaño de mini-lote $B$ debe seleccionarse en potencias de 2 ($2^k$, ej. 1024, 2048, 4096) para máxima velocidad en GPU NVIDIA, asegurando la alineación óptima con las unidades de cómputo (*Warp* / *Tensor Cores*):
 - **Regla de Selección según VRAM**:
   - **GPUs con 4 GB - 6 GB VRAM**: `tamanio_lote = 2048` (valor recomendado para máxima velocidad sin saturar memoria).
@@ -95,5 +102,6 @@ Para continuar entrenando un modelo existente desde un archivo de resguardo `.np
 2. Carga cualquier archivo de backup `.npz` existente (ej. `modelo.cargar_modelo("respaldos/modelo_cbow_w4_epoca_10.npz")`).
 3. Ejecuta `entrenador.entrenar_adicional(epocas_adicionales=N)` indicando únicamente cuántas **épocas adicionales ($N$)** deseas entrenar (por ejemplo `epocas_adicionales=10`).
 4. El entrenador continuará automáticamente el entrenamiento a partir del estado guardado por las $N$ épocas indicadas.
+
 
 

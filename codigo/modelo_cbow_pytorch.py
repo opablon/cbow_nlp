@@ -28,12 +28,18 @@ class ModeloCbowPyTorch(clase_base):
         tamanio_vocabulario: int,
         dimension_embedding: int = 100,
         semilla_aleatoria: int = 26,
+        muestreo_negativo: bool = False,
+        cantidad_muestras_negativas: int = 5,
+        distribucion_unigrama: np.ndarray | None = None,
     ):
         """
         Inicializa las capas Embedding y Linear de PyTorch.
         :param tamanio_vocabulario: Cardinalidad del vocabulario |V|.
         :param dimension_embedding: Numero de neuronas en la capa oculta N.
         :param semilla_aleatoria: Semilla para reproducibilidad (por defecto 26).
+        :param muestreo_negativo: Activa la optimizacion por Muestreo Negativo.
+        :param cantidad_muestras_negativas: Numero de muestras negativas K por elemento.
+        :param distribucion_unigrama: Probabilidades P(w)^0.75 para muestras negativas.
         """
         if not USAR_TORCH:
             raise ImportError("PyTorch no se encuentra instalado o disponible en este entorno.")
@@ -41,33 +47,49 @@ class ModeloCbowPyTorch(clase_base):
         super().__init__()
         self.tamanio_vocabulario = tamanio_vocabulario
         self.dimension_embedding = dimension_embedding
+        self.muestreo_negativo = muestreo_negativo
+        self.cantidad_muestras_negativas = cantidad_muestras_negativas
 
         torch.manual_seed(semilla_aleatoria)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(semilla_aleatoria)
 
         # Capa Embedding de entrada W (|V| x N)
-        # Forma de W: (|V|, N)
         self.capa_embedding = nn.Embedding(tamanio_vocabulario, dimension_embedding)
-        
-        # Inicialización uniforme en [-0.5/N, 0.5/N] siguiendo la especificacion teórica
         limite = 0.5 / dimension_embedding
         nn.init.uniform_(self.capa_embedding.weight, -limite, limite)
 
-        # Capa Lineal de salida W' (N x |V|) sin sesgo (bias=False)
-        # Forma de W': (N, |V|)
+        # Capa Lineal de salida W' (|V| x N)
+        # Softmax: Inicializado en cero absoluto (especificacion clasica).
+        # Negative Sampling: Inicializado aleatorio uniforme en [-0.5/N, 0.5/N] para romper simetria.
         self.capa_salida = nn.Linear(dimension_embedding, tamanio_vocabulario, bias=False)
-        nn.init.zeros_(self.capa_salida.weight)
+        if self.muestreo_negativo:
+            nn.init.uniform_(self.capa_salida.weight, -limite, limite)
+        else:
+            nn.init.zeros_(self.capa_salida.weight)
 
         # Mover modelo al dispositivo adecuado (GPU o CPU)
         self.to(dispositivo_torch)
+
+        # Preparar distribucion de probabilidad unigrama en PyTorch
+        if distribucion_unigrama is not None:
+            self.distribucion_unigrama = torch.from_numpy(distribucion_unigrama).float().to(dispositivo_torch)
+        else:
+            prob_uniforme = np.ones(tamanio_vocabulario, dtype=np.float32) / tamanio_vocabulario
+            self.distribucion_unigrama = torch.from_numpy(prob_uniforme).float().to(dispositivo_torch)
 
         # Atributos de compatibilidad con la interfaz de CuPy
         self.matriz_pesos_entrada = self.capa_embedding.weight
         self.matriz_pesos_salida = self.capa_salida.weight
         
-        # Optimizador para actualizar pesos
-        self.optimizador = optim.SGD(self.parameters(), lr=0.025)
+        # Optimizador restrictivo SGD puro (momentum=0, dampening=0, weight_decay=0)
+        self.optimizador = optim.SGD(
+            self.parameters(),
+            lr=0.025,
+            momentum=0,
+            dampening=0,
+            weight_decay=0,
+        )
         self.funcion_perdida = nn.CrossEntropyLoss()
 
     def propagar_hacia_adelante(self, indices_contexto_batch) -> tuple:
@@ -76,17 +98,13 @@ class ModeloCbowPyTorch(clase_base):
         :param indices_contexto_batch: Tensor de indices de contexto de forma (B, C).
         :return: Tupla (vector_oculto_h, activacion_lineal_u, probabilidades_y).
         """
-        # B = cantidad de muestras en el lote, C = cantidad de palabras de contexto
-        # vectores_contexto de forma: (B, C, N)
         vectores_contexto = self.capa_embedding(indices_contexto_batch)
-        
-        # Vector promedio h de forma: (B, N)
         vector_oculto_h = torch.mean(vectores_contexto, dim=1)
 
-        # Activacion lineal u = h * W' de forma: (B, |V|)
-        activacion_lineal_u = self.capa_salida(vector_oculto_h)
+        if self.muestreo_negativo:
+            return vector_oculto_h, None, None
 
-        # Softmax de forma: (B, |V|)
+        activacion_lineal_u = self.capa_salida(vector_oculto_h)
         probabilidades_y = torch.softmax(activacion_lineal_u, dim=1)
 
         return vector_oculto_h, activacion_lineal_u, probabilidades_y
@@ -101,23 +119,56 @@ class ModeloCbowPyTorch(clase_base):
     ) -> float:
         """
         Calcula gradientes y actualiza los pesos de PyTorch.
-        :param indices_contexto_batch: Tensor de contexto (B, C).
-        :param indices_palabra_objetivo_batch: Tensor objetivo (B,).
-        :param vector_oculto_h: Tensor promedio oculto (B, N).
-        :param probabilidades_y: Tensor Softmax (B, |V|).
-        :param tasa_aprendizaje: Tasa de aprendizaje eta.
-        :return: Valor de la perdida promedio.
         """
-        # Asegurar tasa de aprendizaje actualizada en el optimizador
         for grupo in self.optimizador.param_groups:
             grupo["lr"] = tasa_aprendizaje
 
         self.optimizador.zero_grad()
 
-        # Re-calcular activacion lineal para la gráfica de autograd
+        if self.muestreo_negativo:
+            B = indices_contexto_batch.size(0)
+            K = self.cantidad_muestras_negativas
+
+            # Muestreo de K negativos por cada muestra del lote
+            indices_negativos = torch.multinomial(
+                self.distribucion_unigrama,
+                num_samples=B * K,
+                replacement=True,
+            ).view(B, K)
+
+            # Salvaguarda Teorica: Excluir activamente el objetivo positivo de los negativos
+            mascara = (indices_negativos == indices_palabra_objetivo_batch.unsqueeze(1))
+            while mascara.any():
+                num_col = int(mascara.sum().item())
+                nuevos = torch.multinomial(self.distribucion_unigrama, num_samples=num_col, replacement=True)
+                indices_negativos[mascara] = nuevos
+                mascara = (indices_negativos == indices_palabra_objetivo_batch.unsqueeze(1))
+
+            vectores_ctx = self.capa_embedding(indices_contexto_batch)
+            h = torch.mean(vectores_ctx, dim=1) # (B, N)
+
+            # Pesos de palabras positivas: (B, N)
+            w_pos = self.capa_salida.weight[indices_palabra_objetivo_batch]
+            u_pos = torch.sum(h * w_pos, dim=1) # (B,)
+            target_pos = torch.ones_like(u_pos)
+            loss_pos = nn.functional.binary_cross_entropy_with_logits(u_pos, target_pos, reduction='none')
+
+            # Pesos de palabras negativas: (B, K, N)
+            w_neg = self.capa_salida.weight[indices_negativos]
+            u_neg = torch.sum(h.unsqueeze(1) * w_neg, dim=2) # (B, K)
+            target_neg = torch.zeros_like(u_neg)
+            loss_neg = nn.functional.binary_cross_entropy_with_logits(u_neg, target_neg, reduction='none')
+
+            loss_total = torch.mean(loss_pos + torch.sum(loss_neg, dim=1))
+            loss_total.backward()
+            self.optimizador.step()
+
+            return float(loss_total.item())
+
+        # --- Softmax Completa ---
         vectores_ctx = self.capa_embedding(indices_contexto_batch)
-        h = torch.mean(vectores_ctx, dim=1) # (B, N)
-        logits_u = self.capa_salida(h)      # (B, |V|)
+        h = torch.mean(vectores_ctx, dim=1)
+        logits_u = self.capa_salida(h)
 
         perdida_tensor = self.funcion_perdida(logits_u, indices_palabra_objetivo_batch)
         perdida_tensor.backward()

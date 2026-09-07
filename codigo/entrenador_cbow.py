@@ -69,26 +69,27 @@ class EntrenadorCbow:
 
         total_muestras = len(muestras_objetivo)
         
-        # Convertir a arreglos NumPy para segmentar en lotes
+        # Convertir a arreglos NumPy e inmediatamente pre-cargar a VRAM de la GPU
         matriz_contextos = np.array(muestras_contexto, dtype=np.int64 if USAR_TORCH else np.int32)
         matriz_objetivos = np.array(muestras_objetivo, dtype=np.int64 if USAR_TORCH else np.int32)
 
         es_pytorch = hasattr(self.modelo, "capa_embedding")
 
+        if es_pytorch and USAR_TORCH:
+            dispositivo = next(self.modelo.parameters()).device
+            vram_contextos = torch.from_numpy(matriz_contextos).to(dispositivo)
+            vram_objetivos = torch.from_numpy(matriz_objetivos).to(dispositivo)
+        else:
+            vram_contextos = xp.asarray(matriz_contextos)
+            vram_objetivos = xp.asarray(matriz_objetivos)
+
         lotes_contexto = []
         lotes_objetivo = []
         
+        # Slicing directo en VRAM para eliminar el cuello de botella PCIe
         for i in range(0, total_muestras, tamanio_lote):
-            bloque_ctx = matriz_contextos[i : i + tamanio_lote]
-            bloque_obj = matriz_objetivos[i : i + tamanio_lote]
-            
-            if es_pytorch and USAR_TORCH:
-                dispositivo = next(self.modelo.parameters()).device
-                lotes_contexto.append(torch.from_numpy(bloque_ctx).to(dispositivo))
-                lotes_objetivo.append(torch.from_numpy(bloque_obj).to(dispositivo))
-            else:
-                lotes_contexto.append(xp.asarray(bloque_ctx))
-                lotes_objetivo.append(xp.asarray(bloque_obj))
+            lotes_contexto.append(vram_contextos[i : i + tamanio_lote])
+            lotes_objetivo.append(vram_objetivos[i : i + tamanio_lote])
 
         return lotes_contexto, lotes_objetivo, total_muestras
 
@@ -119,7 +120,7 @@ class EntrenadorCbow:
             tamanio_lote=tamanio_lote,
         )
         cantidad_lotes = len(lotes_contexto)
-        print(f"Total de muestras: {total_muestras:,} distribuidas en {cantidad_lotes:,} lotes.")
+        print(f"Total de muestras: {total_muestras:,} distribuidas en {cantidad_lotes:,} lotes pre-cargados en VRAM.")
 
         for epoca in range(epoca_inicial + 1, cantidad_epocas + 1):
             tiempo_inicio = time.time()
@@ -163,8 +164,8 @@ class EntrenadorCbow:
                 f"Tiempo: {duracion_epoca:.2f}s ({velocidad:,.1f} muestras/s)"
             )
 
-            # Autoguardado de respaldos periodicos (checkpoint)
-            if epoca % self.frecuencia_respaldo == 0 or epoca == cantidad_epocas:
+            # Autoguardado de respaldos periodicos (previene ZeroDivisionError si frecuencia_respaldo es 0)
+            if (self.frecuencia_respaldo > 0 and epoca % self.frecuencia_respaldo == 0) or epoca == cantidad_epocas:
                 ruta_backup = (
                     self.directorio_respaldos
                     / f"modelo_cbow_w{tamanio_ventana}_epoca_{epoca}.npz"

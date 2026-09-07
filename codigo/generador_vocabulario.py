@@ -141,3 +141,23 @@ class GeneradorVocabulario:
             else:
                 lista_tokens.append(self.token_desconocido)
         return lista_tokens
+
+    def obtener_distribucion_unigrama(self, exponente: float = 0.75):
+        """
+        Calcula y retorna la distribucion de probabilidad unigrama elevada al exponente (0.75 por defecto)
+        para el Muestreo Negativo (Negative Sampling).
+        :param exponente: Exponente de suavizado (por defecto 0.75).
+        :return: Arreglo de probabilidades normalizadas de tamaño |V|.
+        """
+        import numpy as np
+        probabilidades = np.zeros(self.tamanio_vocabulario, dtype=np.float32)
+        for idx in range(self.tamanio_vocabulario):
+            palabra = self.indice_a_palabra.get(idx, self.token_desconocido)
+            frecuencia = self.frecuencias_palabras.get(palabra, 1)
+            probabilidades[idx] = float(frecuencia) ** exponente
+
+        suma_total = np.sum(probabilidades)
+        if suma_total > 0:
+            probabilidades = probabilidades / suma_total
+
+        return probabilidades
