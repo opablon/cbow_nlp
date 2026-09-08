@@ -15,6 +15,6 @@ tasa_aprendizaje: 0.2
 cantidad_epocas: 10
 hacer_respaldo: false
 frecuencia_respaldo: 2
-tamanio_lote: 2048
+tamanio_lote: 512
 tipo_similaridad: producto_interno
 semilla_aleatoria: 26
