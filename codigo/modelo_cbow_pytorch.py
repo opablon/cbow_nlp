@@ -28,6 +28,7 @@ class ModeloCbowPyTorch(clase_base):
         tamanio_vocabulario: int,
         dimension_embedding: int = 100,
         semilla_aleatoria: int = 26,
+        tasa_aprendizaje: float = 0.025,
         muestreo_negativo: bool = False,
         cantidad_muestras_negativas: int = 5,
         distribucion_unigrama: np.ndarray | None = None,
@@ -37,6 +38,7 @@ class ModeloCbowPyTorch(clase_base):
         :param tamanio_vocabulario: Cardinalidad del vocabulario |V|.
         :param dimension_embedding: Numero de neuronas en la capa oculta N.
         :param semilla_aleatoria: Semilla para reproducibilidad (por defecto 26).
+        :param tasa_aprendizaje: Tasa de aprendizaje eta inicial para el optimizador SGD.
         :param muestreo_negativo: Activa la optimizacion por Muestreo Negativo.
         :param cantidad_muestras_negativas: Numero de muestras negativas K por elemento.
         :param distribucion_unigrama: Probabilidades P(w)^0.75 para muestras negativas.
@@ -47,6 +49,7 @@ class ModeloCbowPyTorch(clase_base):
         super().__init__()
         self.tamanio_vocabulario = tamanio_vocabulario
         self.dimension_embedding = dimension_embedding
+        self.tasa_aprendizaje = tasa_aprendizaje
         self.muestreo_negativo = muestreo_negativo
         self.cantidad_muestras_negativas = cantidad_muestras_negativas
 
@@ -85,7 +88,7 @@ class ModeloCbowPyTorch(clase_base):
         # Optimizador restrictivo SGD puro (momentum=0, dampening=0, weight_decay=0)
         self.optimizador = optim.SGD(
             self.parameters(),
-            lr=0.025,
+            lr=tasa_aprendizaje,
             momentum=0,
             dampening=0,
             weight_decay=0,

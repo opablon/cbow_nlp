@@ -43,6 +43,12 @@ class EntrenadorCbow:
         self.historial_perdida = []
         self.epoca_actual_cargada = 0
 
+        if self.hacer_respaldo:
+            if not isinstance(self.frecuencia_respaldo, int) or self.frecuencia_respaldo <= 0:
+                raise ValueError(
+                    f"El parametro 'frecuencia_respaldo' debe ser un entero mayor que 0 cuando 'hacer_respaldo' es True. Valor recibido: {self.frecuencia_respaldo}"
+                )
+
     def generar_lotes_cbow(
         self, indices_tokens: list[int], tamanio_ventana: int, tamanio_lote: int = 2048
     ) -> tuple[list, list, int]:
@@ -167,8 +173,8 @@ class EntrenadorCbow:
                 f"Tiempo: {duracion_epoca:.2f}s ({velocidad:,.1f} muestras/s)"
             )
 
-            # Autoguardado de respaldos periodicos (requiere hacer_respaldo True y frecuencia_respaldo > 0)
-            if self.hacer_respaldo and self.frecuencia_respaldo > 0 and (epoca % self.frecuencia_respaldo == 0 or epoca == cantidad_epocas):
+            # Autoguardado de respaldos periodicos (gobernado por hacer_respaldo=True)
+            if self.hacer_respaldo and (epoca % self.frecuencia_respaldo == 0 or epoca == cantidad_epocas):
                 ruta_backup = (
                     self.directorio_respaldos
                     / f"modelo_cbow_w{tamanio_ventana}_epoca_{epoca}.npz"
