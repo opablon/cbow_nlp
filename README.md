@@ -42,6 +42,7 @@ cbow_nlp/
 ├── README.md                               # Instrucciones de clonacion, instalacion y uso
 ├── pyproject.toml                          # Dependencias del proyecto para uv
 ├── configuracion.yaml                      # Hiperparametros centralizados por defecto
+├── entrenar.py                             # Script ejecutable de consola para entrenamiento local
 ├── TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb  # Notebook Master Interactivo
 └── codigo/                                 # Modulos Python reutilizables (snake_case)
     ├── __init__.py
@@ -63,7 +64,7 @@ cbow_nlp/
 Todos los parámetros del proyecto (ruta del corpus, motor de cómputo, tamaño de lote, semilla aleatoria, tamaño de ventana, etc.) pueden configurarse directamente en **dos lugares opcionales**:
 
 1. **Directamente desde el Jupyter Notebook (Recomendado)**: En la **Sección 1** del notebook [TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb](TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb), todos los atributos de `config` están visibles y comentados en una celda de código para que los modifiques directamente en Python sin abrir archivos externos.
-2. **Desde `configuracion.yaml`**: Si prefieres centralizar la configuración en un archivo externo, puedes editar `configuracion.yaml`. El notebook lo leerá automáticamente.
+2. **Desde `configuracion.yaml`**: Si prefieres centralizar la configuración en un archivo externo, puedes editar `configuracion.yaml`. Tanto el notebook como el script de consola `entrenar.py` lo leerán automáticamente.
 
 ### 1. Selección de Fuente del Corpus de Texto
 Para entrenar el modelo con tu propio corpus de texto o con el archivo provisto por la cátedra:
@@ -94,14 +95,44 @@ El tamaño de mini-lote $B$ debe seleccionarse en potencias de 2 ($2^k$, ej. 102
 
 ---
 
+## 💻-☁️ Flujo de Entrenamiento Híbrido (Terminal Local <-> Google Colab)
+
+El proyecto soporta una integración bidireccional entre la terminal de tu máquina local y Google Colab:
+
+### 1. Entrenar en la PC Local desde la Terminal (IDE)
+Para entrenar sin sobrecarga de memoria del navegador y garantizando estabilidad en ejecuciones largas:
+```bash
+# Ejecutar entrenamiento completo con hiperparámetros de configuracion.yaml
+python entrenar.py
+
+# O bien especificando parámetros desde la línea de comandos:
+python entrenar.py --epocas 10 --motor pytorch --lote 2048
+```
+El script procesará el corpus, autoguardará el diccionario en `respaldos/vocabulario.json` y generará los checkpoints periódicos `.npz` en la carpeta `respaldos/`.
+
+### 2. Subir Resguardos a Google Colab / Drive
+Sube la carpeta `respaldos/` completa (con `vocabulario.json` y el checkpoint `.npz` generado, ej. `modelo_cbow_w4_epoca_10.npz`) a tu entorno de Google Colab o carpeta vinculada de Google Drive.
+
+### 3. Reanudar o Evaluar en la GPU de la Nube (Google Colab)
+En la **Sección 4** del notebook [TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb](TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb), ajusta los controles interactivos de entrenamiento:
+```python
+REANUDAR_ENTRENAMIENTO = True
+RUTA_CHECKPOINT = "respaldos/modelo_cbow_w4_epoca_10.npz"
+EPOCAS_A_ENTRENAR = 10  # Épocas adicionales a entrenar en la nube
+```
+Al ejecutar la celda, se cargará el estado exacto del modelo local y se continuará el entrenamiento acelerado en la GPU de Colab. Del mismo modo, puedes utilizar la **Sección 5** para evaluar interactivamente similaridades de palabras sobre los modelos entrenados.
+
+---
+
 ## 🔄 Reanudar o Continuar el Entrenamiento por Épocas Adicionales
 
-Para continuar entrenando un modelo existente desde un archivo de resguardo `.npz` guardado previamente:
+Para continuar entrenando un modelo existente desde un archivo de resguardo `.npz` guardado previamente (ya sea localmente o por script):
 
 1. Abre el notebook [TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb](TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb) (o tu script en Python).
 2. Carga cualquier archivo de backup `.npz` existente (ej. `modelo.cargar_modelo("respaldos/modelo_cbow_w4_epoca_10.npz")`).
 3. Ejecuta `entrenador.entrenar_adicional(epocas_adicionales=N)` indicando únicamente cuántas **épocas adicionales ($N$)** deseas entrenar (por ejemplo `epocas_adicionales=10`).
 4. El entrenador continuará automáticamente el entrenamiento a partir del estado guardado por las $N$ épocas indicadas.
+
 
 
 
