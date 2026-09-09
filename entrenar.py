@@ -96,14 +96,22 @@ def main():
         config.tamanio_lote = args.lote
     if args.tasa is not None:
         config.tasa_aprendizaje = args.tasa
+    if args.reanudar:
+        config.reanudar_entrenamiento = True
+    if args.checkpoint is not None:
+        config.ruta_checkpoint = args.checkpoint
 
     print(f"Configuración cargada desde: {ruta_yaml}")
+    print(f" - Modo Reanudación: {config.reanudar_entrenamiento}")
+    if config.reanudar_entrenamiento:
+        print(f" - Ruta Checkpoint: {config.ruta_checkpoint}")
     print(f" - Motor de Cómputo: {config.motor_computo}")
     print(f" - Corpus: {config.ruta_corpus}")
     print(f" - Dimensión Embedding (N): {config.dimension_embedding}")
     print(f" - Ventana Contexto (W): {config.tamanio_ventana}")
     print(f" - Tamaño de Lote (B): {config.tamanio_lote}")
     print(f" - Tasa Aprendizaje (eta): {config.tasa_aprendizaje}")
+    print(f" - Épocas a Procesar: {config.cantidad_epocas}")
     print(f" - Muestreo Negativo: {config.muestreo_negativo}")
     print(f" - Resguardos: {'Activados (cada ' + str(config.frecuencia_respaldo) + ' épocas)' if config.hacer_respaldo else 'Desactivados'}")
 
@@ -121,13 +129,17 @@ def main():
     # 3. Vocabulario y Persistencia
     print("\n[2/4] Procesando vocabulario y mapeos de índices...")
     vocabulario = GeneradorVocabulario(token_desconocido=config.token_desconocido)
-
-    # Si se reanuda entrenamiento y existe el json, cargar directamente para preservar índices
     ruta_vocab_json = Path(config.directorio_respaldos) / "vocabulario.json"
-    if args.reanudar and ruta_vocab_json.exists():
-        print(f"Cargando vocabulario preexistente desde '{ruta_vocab_json}'...")
+
+    if config.reanudar_entrenamiento:
+        print(f"Modo Reanudación: Cargando vocabulario preexistente desde '{ruta_vocab_json}'...")
+        if not ruta_vocab_json.exists():
+            print(f"Error crítico: Se solicitó reanudar entrenamiento, pero no existe el archivo '{ruta_vocab_json}'.")
+            sys.exit(1)
         vocabulario.cargar_vocabulario(ruta_vocab_json)
+        print(f"Vocabulario cargado exitosamente ({vocabulario.tamanio_vocabulario:,} palabras).")
     else:
+        print("Modo Entrenamiento Limpio: Construyendo vocabulario...")
         vocabulario.construir_vocabulario(
             lista_tokens=tokens_corpus,
             criterio_seleccion=config.criterio_seleccion_vocabulario,
@@ -136,8 +148,8 @@ def main():
             frecuencia_minima=config.frecuencia_minima,
             semilla_aleatoria=config.semilla_aleatoria,
         )
-        # Guardar automáticamente en respaldos/vocabulario.json
         vocabulario.guardar_vocabulario(ruta_vocab_json)
+        print(f"Vocabulario guardado automáticamente en '{ruta_vocab_json}'.")
 
     indices_corpus = vocabulario.convertir_tokens_a_indices(tokens_corpus)
 
@@ -196,24 +208,19 @@ def main():
     # 6. Bucle de Entrenamiento (Limpio o Reanudación)
     print("\n[4/4] Ejecutando bucle de entrenamiento...")
 
-    if args.reanudar:
-        if not args.checkpoint:
-            print("Error: Debe especificar la ruta del checkpoint con --checkpoint al reanudar.")
-            sys.exit(1)
-
-        ruta_checkpoint = Path(args.checkpoint)
+    if config.reanudar_entrenamiento:
+        ruta_checkpoint = Path(config.ruta_checkpoint)
         if not ruta_checkpoint.exists():
             print(f"Error: El archivo de checkpoint '{ruta_checkpoint}' no existe.")
             sys.exit(1)
 
         epoca_cargada, _ = entrenador.cargar_respaldo(ruta_checkpoint)
-        epocas_adicionales = args.epocas if args.epocas is not None else config.cantidad_epocas
         print(f"Checkpoint cargado: '{ruta_checkpoint.name}' (Época base: {epoca_cargada}).")
-        print(f"Reanudando por +{epocas_adicionales} épocas adicionales...")
+        print(f"Reanudando por +{config.cantidad_epocas} épocas adicionales...")
 
         historial = entrenador.entrenar_adicional(
             indices_tokens=indices_corpus,
-            epocas_adicionales=epocas_adicionales,
+            epocas_adicionales=config.cantidad_epocas,
             tamanio_ventana=config.tamanio_ventana,
             tamanio_lote=config.tamanio_lote,
         )

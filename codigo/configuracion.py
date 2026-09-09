@@ -33,8 +33,9 @@ class Configuracion:
         self.hacer_respaldo = True
         self.frecuencia_respaldo = 2
         self.tamanio_lote = 2048
-        self.tipo_similaridad = "producto_interno"
         self.semilla_aleatoria = 26
+        self.reanudar_entrenamiento = False
+        self.ruta_checkpoint = "respaldos/modelo_cbow_w4_epoca_1000.npz"
 
         if ruta_configuracion is not None:
             self.ruta_configuracion = Path(ruta_configuracion)
@@ -71,8 +72,9 @@ class Configuracion:
         diccionario_parametros["hacer_respaldo"] = self.hacer_respaldo
         diccionario_parametros["frecuencia_respaldo"] = self.frecuencia_respaldo
         diccionario_parametros["tamanio_lote"] = self.tamanio_lote
-        diccionario_parametros["tipo_similaridad"] = self.tipo_similaridad
         diccionario_parametros["semilla_aleatoria"] = self.semilla_aleatoria
+        diccionario_parametros["reanudar_entrenamiento"] = self.reanudar_entrenamiento
+        diccionario_parametros["ruta_checkpoint"] = self.ruta_checkpoint
         return diccionario_parametros
 
     def guardar_en_yaml(self, ruta_yaml: Path | str | None = None) -> None:
