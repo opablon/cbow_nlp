@@ -12,9 +12,10 @@ cantidad_muestras_negativas: 5
 tamanio_ventana: 4
 dimension_embedding: 100
 tasa_aprendizaje: 0.2
-cantidad_epocas: 10
-hacer_respaldo: false
-frecuencia_respaldo: 2
-tamanio_lote: 512
-tipo_similaridad: producto_interno
+cantidad_epocas: 1000
+hacer_respaldo: true
+frecuencia_respaldo: 100
+tamanio_lote: 2048
 semilla_aleatoria: 26
+reanudar_entrenamiento: false
+ruta_checkpoint: respaldos/modelo_cbow_w4_epoca_1000.npz
