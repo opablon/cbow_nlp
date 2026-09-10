@@ -157,6 +157,7 @@ class EntrenadorCbow:
                     vector_oculto_h=vector_oculto_h,
                     probabilidades_y=probabilidades_y,
                     tasa_aprendizaje=self.tasa_aprendizaje,
+                    activacion_u=activacion_u,
                 )
                 
                 perdida_acumulada += perdida_lote * len(obj_batch)

@@ -181,7 +181,7 @@ class GeneradorVocabulario:
 
         with open(ruta, "w", encoding="utf-8") as archivo:
             json.dump(datos, archivo, ensure_ascii=False, indent=2)
-        print(f"Vocabulario guardado exitosamente en: {ruta}")
+        print(f"Vocabulario guardado exitosamente en '{ruta}'.")
 
     def cargar_vocabulario(self, ruta_archivo: Path | str) -> None:
         """
@@ -201,5 +201,5 @@ class GeneradorVocabulario:
 
         self.frecuencias_palabras = Counter(datos.get("frecuencias_palabras", {}))
         self.tamanio_vocabulario = len(self.palabra_a_indice)
-        print(f"Vocabulario cargado exitosamente desde {ruta}. Tamanio total: {self.tamanio_vocabulario} tokens.")
+        print(f"Vocabulario cargado exitosamente desde '{ruta}' ({self.tamanio_vocabulario:,} palabras).")
 

@@ -108,7 +108,7 @@ class ModeloCbowPyTorch(clase_base):
             return vector_oculto_h, None, None
 
         activacion_lineal_u = self.capa_salida(vector_oculto_h)
-        probabilidades_y = torch.softmax(activacion_lineal_u, dim=1)
+        probabilidades_y = torch.softmax(activacion_lineal_u, dim=1) if not self.training else None
 
         return vector_oculto_h, activacion_lineal_u, probabilidades_y
 
@@ -119,6 +119,7 @@ class ModeloCbowPyTorch(clase_base):
         vector_oculto_h,
         probabilidades_y,
         tasa_aprendizaje: float,
+        activacion_u=None,
     ) -> float:
         """
         Calcula gradientes y actualiza los pesos de PyTorch.
@@ -147,8 +148,8 @@ class ModeloCbowPyTorch(clase_base):
                 indices_negativos[mascara] = nuevos
                 mascara = (indices_negativos == indices_palabra_objetivo_batch.unsqueeze(1))
 
-            vectores_ctx = self.capa_embedding(indices_contexto_batch)
-            h = torch.mean(vectores_ctx, dim=1) # (B, N)
+            # Reutilizar directamente vector_oculto_h del pase hacia adelante
+            h = vector_oculto_h
 
             # Pesos de palabras positivas: (B, N)
             w_pos = self.capa_salida.weight[indices_palabra_objetivo_batch]
@@ -169,9 +170,11 @@ class ModeloCbowPyTorch(clase_base):
             return float(loss_total.item())
 
         # --- Softmax Completa ---
-        vectores_ctx = self.capa_embedding(indices_contexto_batch)
-        h = torch.mean(vectores_ctx, dim=1)
-        logits_u = self.capa_salida(h)
+        # Reutilizar directamente activacion_u o vector_oculto_h proveniente de propagar_hacia_adelante
+        if activacion_u is not None:
+            logits_u = activacion_u
+        else:
+            logits_u = self.capa_salida(vector_oculto_h)
 
         perdida_tensor = self.funcion_perdida(logits_u, indices_palabra_objetivo_batch)
         perdida_tensor.backward()

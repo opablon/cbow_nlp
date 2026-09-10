@@ -138,6 +138,7 @@ class ModeloCbowCuPy:
         vector_oculto_h: xp.ndarray,
         probabilidades_y: xp.ndarray | None,
         tasa_aprendizaje: float,
+        activacion_u: xp.ndarray | None = None,
     ) -> float:
         """
         Calcula los gradientes vectoriales por lote y actualiza W' y W sin bucles 'for' en Python.

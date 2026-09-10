@@ -132,14 +132,13 @@ def main():
     ruta_vocab_json = Path(config.directorio_respaldos) / "vocabulario.json"
 
     if config.reanudar_entrenamiento:
-        print(f"Modo Reanudación: Cargando vocabulario preexistente desde '{ruta_vocab_json}'...")
+        print(f"Modo Reanudación Activado: Cargando vocabulario preexistente desde '{ruta_vocab_json}'...")
         if not ruta_vocab_json.exists():
             print(f"Error crítico: Se solicitó reanudar entrenamiento, pero no existe el archivo '{ruta_vocab_json}'.")
             sys.exit(1)
         vocabulario.cargar_vocabulario(ruta_vocab_json)
-        print(f"Vocabulario cargado exitosamente ({vocabulario.tamanio_vocabulario:,} palabras).")
     else:
-        print("Modo Entrenamiento Limpio: Construyendo vocabulario...")
+        print("Modo Entrenamiento Limpio: Construyendo vocabulario desde el corpus...")
         vocabulario.construir_vocabulario(
             lista_tokens=tokens_corpus,
             criterio_seleccion=config.criterio_seleccion_vocabulario,
@@ -149,7 +148,6 @@ def main():
             semilla_aleatoria=config.semilla_aleatoria,
         )
         vocabulario.guardar_vocabulario(ruta_vocab_json)
-        print(f"Vocabulario guardado automáticamente en '{ruta_vocab_json}'.")
 
     indices_corpus = vocabulario.convertir_tokens_a_indices(tokens_corpus)
 
