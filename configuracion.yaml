@@ -1,21 +1,70 @@
+# ==============================================================================
+# CONFIGURACIÓN CENTRALIZADA DEL MODELO CBOW Y ENTRENAMIENTO DE EMBEDDINGS
+# Todos los parámetros están escritos en español sin abreviar.
+# ==============================================================================
+
+# Ruta al archivo de texto que contiene el corpus de entrenamiento (ejemplo: 'datos/corpus.txt')
 ruta_corpus: datos/corpus.txt
+
+# Directorio donde se guardarán las copias de respaldo en formato .npz (ejemplo: 'respaldos')
 directorio_respaldos: respaldos
-motor_computo: pytorch
+
+# Estrategia de tokenización y construcción del vocabulario: 'palabra' (palabras completas) o 'bpe' (Byte Pair Encoding)
 estrategia_tokenizacion: palabra
-token_desconocido: <UNK>
-criterio_seleccion_vocabulario: porcentaje
+
+# Incluir signos de puntuación, números y caracteres especiales (solo se aplica si estrategia_tokenizacion es 'palabra'): true o false
+incluir_puntuacion_y_numeros: true
+
+# Criterio de selección del vocabulario (solo se aplica si estrategia_tokenizacion es 'palabra'): 'porcentaje_palabras' o 'cantidad_palabras'
+criterio_seleccion_vocabulario: porcentaje_palabras
+
+# Cantidad fija de palabras únicas si criterio_seleccion_vocabulario es 'cantidad_palabras' (ejemplo: 5000, 15000)
 cantidad_palabras_unicas: 15000
+
+# Porcentaje entre 0.0 y 1.0 si criterio_seleccion_vocabulario es 'porcentaje_palabras' (ejemplo: 0.8 para 80%, 1.0 para 100%)
 porcentaje_palabras_unicas: 1.0
-frecuencia_minima: 1
+
+# Tamaño final del vocabulario BPE (solo se aplica si estrategia_tokenizacion es 'bpe', ejemplo: 5000, 15000)
+bpe_tamanio_vocabulario: 15000
+
+# Frecuencia mínima para incluir un par de tokens en el vocabulario BPE (solo se aplica si estrategia_tokenizacion es 'bpe', ejemplo: 2)
+bpe_frecuencia_minima: 2
+
+# Cantidad máxima de fusiones BPE (solo se aplica si estrategia_tokenizacion es 'bpe', ejemplo: 500, 1000)
+bpe_cantidad_fusiones: 1000
+
+# Activar Muestreo Negativo (Negative Sampling): true o false
 muestreo_negativo: false
+
+# Cantidad de muestras negativas K por cada muestra positiva si muestreo_negativo es true (ejemplo: 5, 10)
 cantidad_muestras_negativas: 5
-tamanio_ventana: 4
+
+# Tamaño de la ventana de contexto C/2 a izquierda y a derecha (ejemplo: 2, 4, 5)
+tamanio_ventana: 5
+
+# Dimensión del vector de embedding o neuronas en la capa oculta N (ejemplo: 50, 100, 300)
 dimension_embedding: 100
+
+# Tasa de aprendizaje (eta) para la actualización de los pesos W y W' (ejemplo: 0.025, 0.1, 0.2)
 tasa_aprendizaje: 0.2
-cantidad_epocas: 1000
+
+# Cantidad total de épocas de entrenamiento a ejecutar (ejemplo: 10, 50, 100)
+cantidad_epocas: 10
+
+# Realizar copias de seguridad automáticas durante el entrenamiento: true o false
 hacer_respaldo: true
-frecuencia_respaldo: 100
-tamanio_lote: 2048
+
+# Frecuencia (en número de épocas) para guardar respaldos automáticos si hacer_respaldo es true (ejemplo: 2, 5)
+frecuencia_respaldo: 2
+
+# Tamaño del mini-lote B para procesamiento vectorial en GPU con CuPy (ejemplo: 512, 1024, 2048)
+tamanio_lote: 512
+
+# Semilla aleatoria para garantizar la reproducibilidad de la inicialización y muestreo (ejemplo: 26)
 semilla_aleatoria: 26
+
+# Reanudar entrenamiento desde una copia de seguridad preexistente: true o false
 reanudar_entrenamiento: false
-ruta_checkpoint: respaldos/modelo_cbow_w4_epoca_1000.npz
+
+# Ruta al archivo .npz de respaldo desde el cual reanudar si reanudar_entrenamiento es true
+ruta_checkpoint: respaldos/modelo_cbow_w5_epoca_10.npz

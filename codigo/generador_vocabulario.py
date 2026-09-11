@@ -1,205 +1,237 @@
 """
-Modulo para la construccion del vocabulario y mapeos de palabras a indices.
-Soporta seleccion aleatoria directa con semilla reproducible y seleccion mutuamente excluyente de tamaño de diccionario.
+Modulo de construccion de vocabulario y generacion de matrices de vectores One-Hot mediante funciones puras.
 """
 
-import json
-import random
 from collections import Counter
+import random
 from pathlib import Path
+import numpy as np
+
+try:
+    import cupy as cp
+
+    _ = cp.zeros((1,), dtype=cp.float32)
+    USAR_CUPY = True
+    xp = cp
+except Exception:
+    USAR_CUPY = False
+    xp = np
 
 
-class GeneradorVocabulario:
-    """Clase encargada de la generacion del diccionario y conversion de tokens a indices en estilo imperativo puro."""
+def construir_vocabulario(
+    lista_tokens: list[str],
+    ruta_corpus: str | Path | None = None,
+    estrategia_tokenizacion: str = "palabra",
+    bpe_tamanio_vocabulario: int = 15000,
+    bpe_frecuencia_minima: int = 2,
+    bpe_cantidad_fusiones: int = 1000,
+    criterio_seleccion_vocabulario: str = "porcentaje_palabras",
+    cantidad_palabras_unicas: int = 15000,
+    porcentaje_palabras_unicas: float = 1.0,
+    token_desconocido: str = "<UNK>",
+    semilla_aleatoria: int = 26,
+) -> np.ndarray:
+    """
+    Construye y devuelve el arreglo unidimensional vocabulario_palabras de tamaño |V|.
+    La posicion del indice en el arreglo corresponde a la dimension activa del vector One-Hot.
 
-    def __init__(self, token_desconocido: str = "<UNK>"):
-        """
-        Inicializa el generador de vocabulario.
-        :param token_desconocido: Token especial para palabras fuera de vocabulario (por defecto "<UNK>").
-        """
-        self.token_desconocido = token_desconocido
-        self.palabra_a_indice = {}
-        self.indice_a_palabra = {}
-        self.frecuencias_palabras = Counter()
-        self.tamanio_vocabulario = 0
-
-    def construir_vocabulario(
-        self,
-        lista_tokens: list[str],
-        criterio_seleccion: str = "cantidad",
-        cantidad_palabras_unicas: int | None = 15000,
-        porcentaje_palabras_unicas: float | None = None,
-        frecuencia_minima: int = 1,
-        semilla_aleatoria: int = 26,
-    ) -> None:
-        """
-        Construye los diccionarios palabra_a_indice e indice_a_palabra.
-        Selecciona las palabras de manera aleatoria directa utilizando una semilla reproducible en estilo imperativo.
-
-        :param lista_tokens: Lista completa de tokens extraidos del corpus.
-        :param criterio_seleccion: "cantidad" para usar cantidad_palabras_unicas o "porcentaje" para usar porcentaje_palabras_unicas.
-        :param cantidad_palabras_unicas: Cantidad fija de palabras unicas a seleccionar al azar.
-        :param porcentaje_palabras_unicas: Porcentaje entre 0.0 y 1.0 de palabras unicas a seleccionar al azar.
-        :param frecuencia_minima: Frecuencia minima para incluir una palabra (por defecto 1).
-        :param semilla_aleatoria: Semilla para garantizar la reproducibilidad del muestreo aleatorio (por defecto 26).
-        """
-        self.frecuencias_palabras = Counter()
-        for token in lista_tokens:
-            self.frecuencias_palabras[token] += 1
-
-        # Filtrado imperativo por frecuencia minima con bucle for
-        palabras_filtradas = []
-        for palabra, frec in self.frecuencias_palabras.items():
-            if frec >= frecuencia_minima:
-                palabras_filtradas.append(palabra)
-
-        total_unicas_filtradas = len(palabras_filtradas)
-
-        # Seleccion de criterio mutuamente excluyente
-        if criterio_seleccion == "cantidad":
-            if cantidad_palabras_unicas is None:
-                raise ValueError(
-                    "Se selecciono el criterio 'cantidad' pero no se especifico 'cantidad_palabras_unicas'."
-                )
-            limite_efectivo = min(cantidad_palabras_unicas, total_unicas_filtradas)
-            print(
-                f"Criterio de Vocabulario: CANTIDAD de palabras unicas = {limite_efectivo} (de {total_unicas_filtradas} disponibles)."
-            )
-        elif criterio_seleccion == "porcentaje":
-            if porcentaje_palabras_unicas is None:
-                raise ValueError(
-                    "Se selecciono el criterio 'porcentaje' pero no se especifico 'porcentaje_palabras_unicas'."
-                )
-            if not (0.0 < porcentaje_palabras_unicas <= 1.0):
-                raise ValueError(
-                    "El parametro 'porcentaje_palabras_unicas' debe estar en el rango (0.0, 1.0]."
-                )
-            limite_efectivo = max(
-                1, int(total_unicas_filtradas * porcentaje_palabras_unicas)
-            )
-            print(
-                f"Criterio de Vocabulario: PORCENTAJE de palabras unicas = {porcentaje_palabras_unicas:.1%} ({limite_efectivo} palabras)."
-            )
-        else:
-            raise ValueError(
-                f"Criterio de seleccion desconocido: '{criterio_seleccion}'. Use 'cantidad' o 'porcentaje'."
-            )
-
-        # Seleccion aleatoria directa sin ordenar previamente para mayor velocidad
-        random.seed(semilla_aleatoria)
-        random.shuffle(palabras_filtradas)
-
-        palabras_seleccionadas = []
-        contador = 0
-        for palabra in palabras_filtradas:
-            if contador < limite_efectivo:
-                palabras_seleccionadas.append(palabra)
-                contador += 1
-
-        # Inicializar los diccionarios reservando el indice 0 para <UNK>
-        self.palabra_a_indice = {}
-        self.palabra_a_indice[self.token_desconocido] = 0
-
-        self.indice_a_palabra = {}
-        self.indice_a_palabra[0] = self.token_desconocido
-
-        indice_actual = 1
-        for palabra in palabras_seleccionadas:
-            self.palabra_a_indice[palabra] = indice_actual
-            self.indice_a_palabra[indice_actual] = palabra
-            indice_actual += 1
-
-        self.tamanio_vocabulario = len(self.palabra_a_indice)
-        print(
-            f"Vocabulario construido exitosamente al azar (semilla={semilla_aleatoria}). Tamanio total: {self.tamanio_vocabulario} tokens."
+    :param lista_tokens: Lista de tokens extraidos del corpus.
+    :param ruta_corpus: Ruta al archivo del corpus (necesario si estrategia_tokenizacion es 'bpe').
+    :param estrategia_tokenizacion: 'palabra' (palabras completas) o 'bpe' (Byte Pair Encoding).
+    :param bpe_tamanio_vocabulario: Tamaño final del vocabulario BPE (solo para 'bpe').
+    :param bpe_frecuencia_minima: Frecuencia minima de pares de tokens para BPE (solo para 'bpe').
+    :param bpe_cantidad_fusiones: Numero maximo de fusiones BPE (solo para 'bpe').
+    :param criterio_seleccion_vocabulario: 'porcentaje_palabras' o 'cantidad_palabras' (solo para 'palabra').
+    :param cantidad_palabras_unicas: Cantidad fija de palabras si criterio es 'cantidad_palabras'.
+    :param porcentaje_palabras_unicas: Porcentaje entre 0.0 y 1.0 si criterio es 'porcentaje_palabras'.
+    :param token_desconocido: Token reservado para elementos fuera de vocabulario (por defecto '<UNK>').
+    :param semilla_aleatoria: Semilla para garatizar la reproducibilidad.
+    :return: Arreglo de NumPy unidimensional con las |V| cadenas de texto del vocabulario.
+    """
+    if estrategia_tokenizacion == "bpe":
+        return _construir_vocabulario_bpe(
+            ruta_corpus=ruta_corpus,
+            lista_tokens=lista_tokens,
+            tamanio_objetivo=bpe_tamanio_vocabulario,
+            frecuencia_minima=bpe_frecuencia_minima,
+            cantidad_fusiones=bpe_cantidad_fusiones,
+            token_desconocido=token_desconocido,
         )
 
-    def convertir_tokens_a_indices(self, lista_tokens: list[str]) -> list[int]:
-        """
-        Convierte una lista de tokens de texto a sus correspondientes indices enteros utilizando un bucle for imperativo.
-        Cualquier palabra fuera del vocabulario se reemplaza por el indice de <UNK>.
-        :param lista_tokens: Lista de palabras en texto.
-        :return: Lista de indices enteros.
-        """
-        indice_unk = self.palabra_a_indice[self.token_desconocido]
-        lista_indices = []
-        for token in lista_tokens:
-            if token in self.palabra_a_indice:
-                lista_indices.append(self.palabra_a_indice[token])
-            else:
-                lista_indices.append(indice_unk)
-        return lista_indices
+    # --- Estrategia 'palabra' (Palabras completas) ---
+    frecuencias = Counter(lista_tokens)
+    palabras_unicas = list(frecuencias.keys())
+    total_unicas = len(palabras_unicas)
 
-    def convertir_indices_a_tokens(self, lista_indices: list[int]) -> list[str]:
-        """
-        Convierte una lista de indices enteros a sus palabras originales utilizando un bucle for imperativo.
-        :param lista_indices: Lista de indices enteros.
-        :return: Lista de cadenas de texto.
-        """
-        lista_tokens = []
-        for idx_entero in lista_indices:
-            if idx_entero in self.indice_a_palabra:
-                lista_tokens.append(self.indice_a_palabra[idx_entero])
-            else:
-                lista_tokens.append(self.token_desconocido)
-        return lista_tokens
+    if criterio_seleccion_vocabulario == "cantidad_palabras":
+        limite_efectivo = min(cantidad_palabras_unicas, total_unicas)
+    elif criterio_seleccion_vocabulario == "porcentaje_palabras":
+        porcentaje_validado = max(0.001, min(1.0, porcentaje_palabras_unicas))
+        limite_efectivo = max(1, int(total_unicas * porcentaje_validado))
+    else:
+        raise ValueError(f"Criterio no soportado: {criterio_seleccion_vocabulario}")
 
-    def obtener_distribucion_unigrama(self, exponente: float = 0.75):
-        """
-        Calcula y retorna la distribucion de probabilidad unigrama elevada al exponente (0.75 por defecto)
-        para el Muestreo Negativo (Negative Sampling).
-        :param exponente: Exponente de suavizado (por defecto 0.75).
-        :return: Arreglo de probabilidades normalizadas de tamaño |V|.
-        """
-        import numpy as np
-        probabilidades = np.zeros(self.tamanio_vocabulario, dtype=np.float32)
-        for idx in range(self.tamanio_vocabulario):
-            palabra = self.indice_a_palabra.get(idx, self.token_desconocido)
-            frecuencia = self.frecuencias_palabras.get(palabra, 1)
-            probabilidades[idx] = float(frecuencia) ** exponente
+    random.seed(semilla_aleatoria)
+    random.shuffle(palabras_unicas)
 
-        suma_total = np.sum(probabilidades)
-        if suma_total > 0:
-            probabilidades = probabilidades / suma_total
+    palabras_seleccionadas = palabras_unicas[:limite_efectivo]
 
-        return probabilidades
+    # Reservar la primera posicion (indice 0) para token_desconocido
+    if token_desconocido in palabras_seleccionadas:
+        palabras_seleccionadas.remove(token_desconocido)
 
-    def guardar_vocabulario(self, ruta_archivo: Path | str) -> None:
-        """
-        Guarda la estructura completa del vocabulario y sus frecuencias en un archivo JSON.
-        :param ruta_archivo: Ruta donde almacenar el archivo JSON.
-        """
-        ruta = Path(ruta_archivo)
-        ruta.parent.mkdir(parents=True, exist_ok=True)
+    vocabulario_lista = [token_desconocido] + palabras_seleccionadas
+    return np.array(vocabulario_lista, dtype=object)
 
-        datos = {
-            "token_desconocido": self.token_desconocido,
-            "palabra_a_indice": self.palabra_a_indice,
-            "frecuencias_palabras": dict(self.frecuencias_palabras),
-            "tamanio_vocabulario": self.tamanio_vocabulario,
-        }
 
-        with open(ruta, "w", encoding="utf-8") as archivo:
-            json.dump(datos, archivo, ensure_ascii=False, indent=2)
-        print(f"Vocabulario guardado exitosamente en '{ruta}'.")
+def _construir_vocabulario_bpe(
+    ruta_corpus: str | Path | None,
+    lista_tokens: list[str],
+    tamanio_objetivo: int,
+    frecuencia_minima: int,
+    cantidad_fusiones: int,
+    token_desconocido: str,
+) -> np.ndarray:
+    """
+    Funcion auxiliar para entrenar y construir el vocabulario BPE.
+    """
+    try:
+        from tokenizers import Tokenizer, models, trainers, pre_tokenizers
 
-    def cargar_vocabulario(self, ruta_archivo: Path | str) -> None:
-        """
-        Carga la estructura del vocabulario y sus frecuencias desde un archivo JSON.
-        :param ruta_archivo: Ruta al archivo JSON de vocabulario.
-        """
-        ruta = Path(ruta_archivo)
-        with open(ruta, "r", encoding="utf-8") as archivo:
-            datos = json.load(archivo)
+        tokenizer = Tokenizer(models.BPE(unk_token=token_desconocido))
+        tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
 
-        self.token_desconocido = datos.get("token_desconocido", "<UNK>")
-        self.palabra_a_indice = datos["palabra_a_indice"]
+        trainer = trainers.BpeTrainer(
+            vocab_size=tamanio_objetivo,
+            min_frequency=frecuencia_minima,
+            special_tokens=[token_desconocido],
+        )
 
-        self.indice_a_palabra = {}
-        for palabra, idx in self.palabra_a_indice.items():
-            self.indice_a_palabra[int(idx)] = palabra
+        if ruta_corpus is not None and Path(ruta_corpus).exists():
+            tokenizer.train([str(ruta_corpus)], trainer=trainer)
+        else:
+            tokenizer.train_from_iterator(lista_tokens, trainer=trainer)
 
-        self.frecuencias_palabras = Counter(datos.get("frecuencias_palabras", {}))
-        self.tamanio_vocabulario = len(self.palabra_a_indice)
-        print(f"Vocabulario cargado exitosamente desde '{ruta}' ({self.tamanio_vocabulario:,} palabras).")
+        vocab_dict = tokenizer.get_vocab()
+        vocab_ordenado = sorted(vocab_dict.items(), key=lambda item: item[1])
+        return np.array([token for token, idx in vocab_ordenado], dtype=object)
+    except ImportError:
+        pass
 
+    import re
+
+    vocab_bpe = Counter()
+    for token in lista_tokens:
+        palabra_espaciada = " ".join(list(token)) + " </w>"
+        vocab_bpe[palabra_espaciada] += 1
+
+    def obtener_estadisticas_pares(vocab):
+        pares = Counter()
+        for word, freq in vocab.items():
+            symbols = word.split()
+            for i in range(len(symbols) - 1):
+                pares[symbols[i], symbols[i + 1]] += freq
+        return pares
+
+    def fusionar_vocabulario(par, v_in):
+        v_out = {}
+        bigram = re.escape(" ".join(par))
+        patron = re.compile(r"(?<!\S)" + bigram + r"(?!\S)")
+        remplazo = "".join(par)
+        for word in v_in:
+            w_out = patron.sub(remplazo, word)
+            v_out[w_out] = v_in[word]
+        return v_out
+
+    simbolos_unicos = set()
+    for palabra_str in vocab_bpe.keys():
+        simbolos_unicos.update(palabra_str.split())
+
+    subpalabras = [token_desconocido] + list(simbolos_unicos)
+
+    num_merges = min(cantidad_fusiones, max(0, tamanio_objetivo - len(subpalabras)))
+    for _ in range(num_merges):
+        pares = obtener_estadisticas_pares(vocab_bpe)
+        if not pares:
+            break
+        mejor_par = max(pares, key=pares.get)
+        if pares[mejor_par] < frecuencia_minima:
+            break
+        vocab_bpe = fusionar_vocabulario(mejor_par, vocab_bpe)
+        nueva_subpalabra = "".join(mejor_par)
+        if nueva_subpalabra not in subpalabras:
+            subpalabras.append(nueva_subpalabra)
+        if len(subpalabras) >= tamanio_objetivo:
+            break
+
+    return np.array(subpalabras, dtype=object)
+
+
+def generar_vectores_one_hot(
+    indices_tokens: list[int],
+    tamanio_vocabulario: int,
+    tamanio_ventana: int,
+    tamanio_lote: int = 2048,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Extrae la matriz completa de indices de contexto y palabra objetivo para el corpus.
+
+    :param indices_tokens: Lista de indices enteros correspondientes a las palabras del corpus.
+    :param tamanio_vocabulario: Cardinalidad |V| del vocabulario.
+    :param tamanio_ventana: Tamaño de ventana C/2 a izquierda y a derecha.
+    :param tamanio_lote: Cantidad de muestras por mini-lote B (por defecto 2048).
+    :return: Tupla (matriz_contextos_idx, matriz_objetivos_idx).
+    """
+    longitud_total = len(indices_tokens)
+    limite_inicio = tamanio_ventana
+    limite_fin = longitud_total - tamanio_ventana
+
+    if limite_fin <= limite_inicio:
+        raise ValueError("El corpus es demasiado corto para el tamaño de ventana especificado.")
+
+    muestras_contexto_indices = []
+    muestras_objetivo_indices = []
+
+    for i in range(limite_inicio, limite_fin):
+        contexto = []
+        for idx_izq in range(i - tamanio_ventana, i):
+            contexto.append(indices_tokens[idx_izq])
+        for idx_der in range(i + 1, i + tamanio_ventana + 1):
+            contexto.append(indices_tokens[idx_der])
+
+        muestras_contexto_indices.append(contexto)
+        muestras_objetivo_indices.append(indices_tokens[i])
+
+    matriz_contextos_idx = np.array(muestras_contexto_indices, dtype=np.int32)
+    matriz_objetivos_idx = np.array(muestras_objetivo_indices, dtype=np.int32)
+
+    return matriz_contextos_idx, matriz_objetivos_idx
+
+
+def crear_matriz_one_hot_lote(
+    sub_contextos_idx: np.ndarray,
+    sub_objetivos_idx: np.ndarray,
+    tamanio_vocabulario: int,
+) -> tuple[xp.ndarray, xp.ndarray]:
+    """
+    Construye bajo demanda en GPU/CPU las matrices densas de codificación One-Hot x y t para un mini-lote.
+
+    :param sub_contextos_idx: Matriz de indices de contexto para el lote (B_lote x C).
+    :param sub_objetivos_idx: Arreglo de indices objetivo para el lote (B_lote,).
+    :param tamanio_vocabulario: Cardinalidad |V| del vocabulario.
+    :return: Tupla (x_lote, t_lote) con las matrices One-Hot (B_lote x |V|).
+    """
+    B_lote = sub_contextos_idx.shape[0]
+
+    # x_lote (B_lote x |V|): Matriz One-Hot con la suma de las palabras del contexto
+    x_lote = xp.zeros((B_lote, tamanio_vocabulario), dtype=xp.float32)
+    for c in range(sub_contextos_idx.shape[1]):
+        indices_col = xp.asarray(sub_contextos_idx[:, c])
+        xp.add.at(x_lote, (xp.arange(B_lote), indices_col), 1.0)
+
+    # t_lote (B_lote x |V|): Matriz One-Hot con 1 en el indice objetivo deseado
+    t_lote = xp.zeros((B_lote, tamanio_vocabulario), dtype=xp.float32)
+    indices_obj = xp.asarray(sub_objetivos_idx)
+    t_lote[xp.arange(B_lote), indices_obj] = 1.0
+
+    return x_lote, t_lote

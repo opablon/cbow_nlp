@@ -1,313 +1,229 @@
 """
-Modulo de la red neuronal CBOW implementada en CuPy GPU / NumPy.
-Optimizado para maxima velocidad de entrenamiento mediante procesamiento por lotes vectorizado en GPU.
+Modulo de calculo matricial para la red neuronal CBOW mediante funciones puras en CuPy / NumPy.
+Implementa con estricta fidelidad las ecuaciones y notacion teorica de la catedra.
 """
 
 import os
 import sys
+import ctypes
 from pathlib import Path
 import numpy as np
 
-# Configurar rutas de librerias CUDA instaladas en .venv para CuPy
-ruta_base_venv = Path(__file__).resolve().parent.parent / ".venv"
-carpeta_nvidia = (
-    ruta_base_venv
+# Cargar automaticamente bibliotecas dinámicas CUDA instaladas en el .venv
+_ruta_venv = Path(__file__).resolve().parent.parent / ".venv"
+_carpeta_nvidia = (
+    _ruta_venv
     / "lib"
     / f"python{sys.version_info.major}.{sys.version_info.minor}"
     / "site-packages"
     / "nvidia"
 )
 
-if carpeta_nvidia.exists():
-    rutas_lib = []
-    for subcarpeta in carpeta_nvidia.glob("*"):
-        carpeta_lib = subcarpeta / "lib"
-        if carpeta_lib.exists():
-            rutas_lib.append(str(carpeta_lib))
-
-    if len(rutas_lib) > 0:
-        ld_actual = os.environ.get("LD_LIBRARY_PATH", "")
-        if ld_actual != "":
-            rutas_lib.append(ld_actual)
-        os.environ["LD_LIBRARY_PATH"] = ":".join(rutas_lib)
+if _carpeta_nvidia.exists():
+    for _lib_dir in _carpeta_nvidia.glob("*/lib"):
+        for _so_file in _lib_dir.glob("*.so*"):
+            try:
+                ctypes.CDLL(str(_so_file))
+            except Exception:
+                pass
 
 try:
     import cupy as cp
 
-    # Verificar ejecucion real en GPU de CuPy
     _ = cp.zeros((1,), dtype=cp.float32)
-    _ = cp.random.seed(26)
     USAR_CUPY = True
     xp = cp
-except Exception as error_cupy:
-    print(
-        f"Advertencia: CuPy GPU no disponible en este entorno ({error_cupy}). Ejecutando con NumPy en CPU."
-    )
+except Exception:
     USAR_CUPY = False
     xp = np
 
 
-class ModeloCbowCuPy:
-    """Red Neuronal CBOW implementada con procesamiento por lotes vectorizado para ejecucion acelerada en GPU NVIDIA o CPU."""
+def inicializar_pesos(
+    tamanio_vocabulario: int, dimension_embedding: int, semilla_aleatoria: int = 26
+) -> tuple[xp.ndarray, xp.ndarray]:
+    """
+    Inicializa las matrices de pesos W (entrada) y W' (salida) de la red neuronal CBOW.
+    Matriz W se inicializa con distribucion uniforme pequena en [-0.5/N, 0.5/N].
+    Matriz W' se inicializa estrictamente en ceros (W' = 0).
 
-    def __init__(
-        self,
-        tamanio_vocabulario: int,
-        dimension_embedding: int = 100,
-        semilla_aleatoria: int = 26,
-        muestreo_negativo: bool = False,
-        cantidad_muestras_negativas: int = 5,
-        distribucion_unigrama: xp.ndarray | None = None,
-    ):
-        """
-        Inicializa las matrices de pesos W y W' en la GPU o CPU.
-        :param tamanio_vocabulario: Cardinalidad del vocabulario |V|.
-        :param dimension_embedding: Numero de neuronas en la capa oculta N.
-        :param semilla_aleatoria: Semilla para reproducibilidad (por defecto 26).
-        :param muestreo_negativo: Si es True, activa el Muestreo Negativo (Negative Sampling).
-        :param cantidad_muestras_negativas: Cantidad de muestras negativas K por elemento.
-        :param distribucion_unigrama: Arreglo de probabilidad unigrama P(w)^0.75 para muestras negativas.
-        """
-        self.tamanio_vocabulario = tamanio_vocabulario
-        self.dimension_embedding = dimension_embedding
-        self.muestreo_negativo = muestreo_negativo
-        self.cantidad_muestras_negativas = cantidad_muestras_negativas
+    :param tamanio_vocabulario: Cardinalidad del vocabulario |V|.
+    :param dimension_embedding: Dimension de la capa oculta o vector de embedding N.
+    :param semilla_aleatoria: Semilla para reproducibilidad aleatoria (por defecto 26).
+    :return: Tupla con las matrices de pesos (W, W_prima).
+    """
+    xp.random.seed(semilla_aleatoria)
+    limite = 0.5 / dimension_embedding
 
-        xp.random.seed(semilla_aleatoria)
+    # W (|V| x N): Matriz de pesos entre entrada y capa oculta
+    W = xp.random.uniform(
+        -limite, limite, (tamanio_vocabulario, dimension_embedding)
+    ).astype(xp.float32)
 
-        # Matriz W de entrada (|V| x N): cada fila corresponde a la representacion de una palabra
-        limite = 0.5 / dimension_embedding
-        self.matriz_pesos_entrada = xp.random.uniform(
-            -limite, limite, (tamanio_vocabulario, dimension_embedding)
-        ).astype(xp.float32)
+    # W' (N x |V|): Matriz de pesos entre capa oculta y capa de salida (inicializada en CEROS)
+    W_prima = xp.zeros(
+        (dimension_embedding, tamanio_vocabulario), dtype=xp.float32
+    )
 
-        # Matriz W' de salida (N x |V|):
-        # Softmax: Inicializado en cero absoluto (especificacion clasica).
-        # Negative Sampling: Inicializado aleatorio uniforme en [-0.5/N, 0.5/N] para romper simetria.
-        if self.muestreo_negativo:
-            self.matriz_pesos_salida = xp.random.uniform(
-                -limite, limite, (dimension_embedding, tamanio_vocabulario)
-            ).astype(xp.float32)
-        else:
-            self.matriz_pesos_salida = xp.zeros(
-                (dimension_embedding, tamanio_vocabulario), dtype=xp.float32
-            )
+    return W, W_prima
 
-        # Preparar distribucion de probabilidad unigrama en GPU/CPU
-        if distribucion_unigrama is not None:
-            self.distribucion_unigrama = xp.asarray(distribucion_unigrama, dtype=xp.float32)
-        else:
-            prob_uniforme = np.ones(tamanio_vocabulario, dtype=np.float32) / tamanio_vocabulario
-            self.distribucion_unigrama = xp.asarray(prob_uniforme, dtype=xp.float32)
 
-    def propagar_hacia_adelante(self, indices_contexto_batch: xp.ndarray) -> tuple:
-        """
-        Propagacion hacia adelante vectorizada por lotes para B muestras.
-        Calcula el vector promedio de la capa oculta h, las activaciones lineales u y la salida Softmax y (si aplica).
-        :param indices_contexto_batch: Arreglo de indices de contexto de forma (B, C) donde C = 2 * W.
-        :return: Tupla (vector_oculto_h, activacion_lineal_u, probabilidades_y).
-        """
-        # B = cantidad de muestras en el lote, C = cantidad total de palabras de contexto
-        B, C = indices_contexto_batch.shape
+def propagar_hacia_adelante(
+    x: xp.ndarray, W: xp.ndarray, W_prima: xp.ndarray, C: float = 1.0
+) -> tuple[xp.ndarray, xp.ndarray, xp.ndarray]:
+    """
+    Propagacion hacia adelante matricial One-Hot para el lote de muestras.
+    Calcula el vector de la capa oculta h, las excitaciones de salida u y las probabilidades Softmax y.
 
-        # h es el promedio de las filas de W correspondientes a los indices del contexto
-        # h = (1 / C) * sum_{c=1}^C W[I_c, :]^T
-        vectores_contexto = self.matriz_pesos_entrada[indices_contexto_batch]
-        vector_oculto_h = xp.mean(vectores_contexto, axis=1)
+    Ecuaciones de la catedra:
+    h = (1 / C) * x * W
+    u = h * W'
+    y = softmax(u)
 
-        if self.muestreo_negativo:
-            # En Muestreo Negativo se omite la Softmax global masiva O(|V|)
-            return vector_oculto_h, None, None
+    :param x: Matriz One-Hot de contexto (B x |V|).
+    :param W: Matriz de pesos de entrada (|V| x N).
+    :param W_prima: Matriz de pesos de salida (N x |V|).
+    :param C: Numero de palabras en la ventana de contexto (ejemplo: 2 * tamanio_ventana).
+    :return: Tupla (h, u, y) con las activaciones, excitaciones y probabilidades.
+    """
+    # h = (1 / C) * x * W  ->  Forma (B, N)
+    h = (1.0 / C) * xp.dot(x, W)
 
-        # u = h * W' (Activacion lineal no normalizada de la capa de salida)
-        activacion_lineal_u = xp.dot(vector_oculto_h, self.matriz_pesos_salida)
+    # u = h * W'  ->  Forma (B, |V|)
+    u = xp.dot(h, W_prima)
 
-        # Softmax estabilizada numericante
-        activacion_estabilizada = activacion_lineal_u - xp.max(
-            activacion_lineal_u, axis=1, keepdims=True
-        )
-        exponenciales = xp.exp(activacion_estabilizada)
-        probabilidades_y = exponenciales / xp.sum(exponenciales, axis=1, keepdims=True)
+    # y = softmax(u) estabilizada numericamente
+    u_estabilizada = u - xp.max(u, axis=1, keepdims=True)
+    exponenciales = xp.exp(u_estabilizada)
+    y = exponenciales / xp.sum(exponenciales, axis=1, keepdims=True)
 
-        return vector_oculto_h, activacion_lineal_u, probabilidades_y
+    return h, u, y
 
-    def retropropagar_y_actualizar(
-        self,
-        indices_contexto_batch: xp.ndarray,
-        indices_palabra_objetivo_batch: xp.ndarray,
-        vector_oculto_h: xp.ndarray,
-        probabilidades_y: xp.ndarray | None,
-        tasa_aprendizaje: float,
-        activacion_u: xp.ndarray | None = None,
-    ) -> float:
-        """
-        Calcula los gradientes vectoriales por lote y actualiza W' y W sin bucles 'for' en Python.
-        """
-        B, C = indices_contexto_batch.shape
 
-        if self.muestreo_negativo:
-            K = self.cantidad_muestras_negativas
-            
-            # Muestreo de K palabras negativas por cada muestra del lote
-            indices_negativos = xp.random.choice(
-                self.tamanio_vocabulario,
-                size=(B, K),
-                p=self.distribucion_unigrama,
-            )
+def retropropagar_y_actualizar(
+    x: xp.ndarray,
+    t: xp.ndarray,
+    h: xp.ndarray,
+    y: xp.ndarray,
+    W: xp.ndarray,
+    W_prima: xp.ndarray,
+    eta: float,
+    C: float = 1.0,
+) -> tuple[xp.ndarray, xp.ndarray, float]:
+    """
+    Retropropagacion de errores y actualizacion de gradientes para las matrices W y W'.
 
-            # Salvaguarda Teorica: Excluir activamente el objetivo positivo del conjunto de negativos
-            mascara_colision = (indices_negativos == indices_palabra_objetivo_batch[:, None])
-            while float(xp.sum(mascara_colision)) > 0:
-                num_colisiones = int(xp.sum(mascara_colision))
-                nuevos_negativos = xp.random.choice(
-                    self.tamanio_vocabulario,
-                    size=num_colisiones,
-                    p=self.distribucion_unigrama,
-                )
-                indices_negativos[mascara_colision] = nuevos_negativos
-                mascara_colision = (indices_negativos == indices_palabra_objetivo_batch[:, None])
+    Ecuaciones de la catedra:
+    e = y - t
+    EH = e * W'^T
+    W' = W' - eta * (h^T * e) / B
+    W = W - eta * (1 / C) * (x^T * EH) / B
 
-            # W'_salida transpuesto es (|V|, N)
-            pesos_salida_T = self.matriz_pesos_salida.T
-            
-            # Pesos de palabras positivas: (B, N)
-            W_pos = pesos_salida_T[indices_palabra_objetivo_batch]
-            
-            # Pesos de palabras negativas: (B, K, N)
-            W_neg = pesos_salida_T[indices_negativos]
+    :param x: Matriz One-Hot de contexto (B x |V|).
+    :param t: Matriz One-Hot de la palabra objetivo deseada (B x |V|).
+    :param h: Vector/matriz de activación de la capa oculta (B x N).
+    :param y: Vector/matriz de probabilidades de salida Softmax (B x |V|).
+    :param W: Matriz de pesos de entrada (|V| x N).
+    :param W_prima: Matriz de pesos de salida (N x |V|).
+    :param eta: Tasa de aprendizaje.
+    :param C: Cantidad de palabras en el contexto.
+    :return: Tupla (W, W_prima, perdida_promedio).
+    """
+    B = x.shape[0]
 
-            # u_pos = h * W'_pos: (B,)
-            u_pos = xp.sum(vector_oculto_h * W_pos, axis=1)
-            sigma_pos = 1.0 / (1.0 + xp.exp(-u_pos))
-            loss_pos = -xp.log(xp.maximum(sigma_pos, 1e-12))
+    # Vector de error en la capa de salida: e = y - t  ->  Forma (B, |V|)
+    e = y - t
 
-            # u_neg = h * W'_neg: (B, K)
-            u_neg = xp.sum(vector_oculto_h[:, None, :] * W_neg, axis=2)
-            sigma_neg_inv = 1.0 / (1.0 + xp.exp(u_neg)) # sigma(-u)
-            loss_neg = -xp.log(xp.maximum(sigma_neg_inv, 1e-12))
+    # Calculo de perdida Cross-Entropy promedio del lote
+    probabilidades_objetivo = xp.sum(y * t, axis=1)
+    probabilidades_estables = xp.maximum(probabilidades_objetivo, 1e-12)
+    perdida_promedio = float(-xp.mean(xp.log(probabilidades_estables)))
 
-            perdida_promedio = float(xp.mean(loss_pos + xp.sum(loss_neg, axis=1)))
+    # Error retropropagado a la capa oculta: EH = e * W'^T  ->  Forma (B, N)
+    EH = xp.dot(e, W_prima.T)
 
-            # Gradientes respecto a W':
-            g_pos = (sigma_pos - 1.0)[:, None]  # (B, 1)
-            grad_W_pos = (tasa_aprendizaje / B) * (g_pos * vector_oculto_h)  # (B, N)
-            xp.add.at(pesos_salida_T, indices_palabra_objetivo_batch, -grad_W_pos)
+    # Actualizacion de W': W' = W' - eta * (h^T * e) / B  ->  Forma (N, |V|)
+    gradiente_W_prima = xp.dot(h.T, e) / B
+    W_prima -= eta * gradiente_W_prima
 
-            g_neg = (1.0 - sigma_neg_inv)[:, :, None]  # (B, K, 1) -> sigma(u)
-            grad_W_neg = (tasa_aprendizaje / B) * (g_neg * vector_oculto_h[:, None, :]).reshape(-1, self.dimension_embedding)
-            indices_neg_flat = indices_negativos.ravel()
-            xp.add.at(pesos_salida_T, indices_neg_flat, -grad_W_neg)
+    # Actualizacion de W: W = W - eta * (1 / C) * (x^T * EH) / B  ->  Forma (|V|, N)
+    gradiente_W = xp.dot(x.T, EH) / (B * C)
+    W -= eta * gradiente_W
 
-            # Error retropropagado a la capa oculta EH: (B, N)
-            vector_error_oculto_EH = g_pos * W_pos + xp.sum(g_neg * W_neg, axis=1)
+    return W, W_prima, perdida_promedio
 
-            # Actualizacion vectorizada de W (entrada) sin bucles Python
-            delta_entrada = (tasa_aprendizaje / (B * C)) * vector_error_oculto_EH
-            indices_flat = indices_contexto_batch.ravel()
-            delta_repetida = xp.repeat(delta_entrada, C, axis=0)
-            xp.add.at(self.matriz_pesos_entrada, indices_flat, -delta_repetida)
 
-            return perdida_promedio
+def guardar_modelo(modelo: dict, ruta_archivo: str | Path) -> None:
+    """
+    Almacena de forma atomica el estado completo del modelo en un archivo binario comprimido .npz.
 
-        # --- Softmax Completa ---
-        probabilidades_objetivo = probabilidades_y[
-            xp.arange(B), indices_palabra_objetivo_batch
-        ]
-        probabilidades_estables = xp.maximum(probabilidades_objetivo, 1e-12)
-        perdida_promedio = float(-xp.mean(xp.log(probabilidades_estables)))
+    :param modelo: Diccionario que contiene W, W_prima, vocabulario_palabras, historial_perdida, etc.
+    :param ruta_archivo: Ruta del archivo de destino (.npz).
+    :return: None.
+    """
+    destino = Path(ruta_archivo)
+    destino.parent.mkdir(parents=True, exist_ok=True)
 
-        vector_error_salida = probabilidades_y.copy()
-        vector_error_salida[xp.arange(B), indices_palabra_objetivo_batch] -= 1.0
+    W = modelo["W"]
+    W_prima = modelo["W_prima"]
+    vocabulario_palabras = modelo["vocabulario_palabras"]
 
-        # Actualizacion W'
-        gradiente_W_prima = xp.dot(vector_oculto_h.T, vector_error_salida) / B
-        self.matriz_pesos_salida -= tasa_aprendizaje * gradiente_W_prima
+    if USAR_CUPY and hasattr(W, "get"):
+        W_np = W.get()
+        W_prima_np = W_prima.get()
+    elif USAR_CUPY and hasattr(cp, "asnumpy"):
+        W_np = cp.asnumpy(W)
+        W_prima_np = cp.asnumpy(W_prima)
+    else:
+        W_np = np.asarray(W)
+        W_prima_np = np.asarray(W_prima)
 
-        # Error en capa oculta EH: (B, N)
-        vector_error_oculto_EH = xp.dot(vector_error_salida, self.matriz_pesos_salida.T)
+    datos_guardar = {
+        "W": W_np,
+        "W_prima": W_prima_np,
+        "vocabulario_palabras": np.asarray(vocabulario_palabras, dtype=object),
+        "epoca_actual": int(modelo.get("epoca_actual", 0)),
+        "historial_perdida": np.asarray(modelo.get("historial_perdida", []), dtype=np.float32),
+        "tamanio_vocabulario": int(len(vocabulario_palabras)),
+        "dimension_embedding": int(W_np.shape[1]),
+    }
 
-        # Actualizacion vectorizada de W (entrada) sin bucles Python
-        delta_entrada = (tasa_aprendizaje / (B * C)) * vector_error_oculto_EH
-        indices_flat = indices_contexto_batch.ravel()
-        delta_repetida = xp.repeat(delta_entrada, C, axis=0)
-        xp.add.at(self.matriz_pesos_entrada, indices_flat, -delta_repetida)
+    if "configuracion" in modelo:
+        datos_guardar["configuracion_json"] = str(modelo["configuracion"])
 
-        return perdida_promedio
+    np.savez_compressed(destino, **datos_guardar)
+    print(f"Modelo guardado exitosamente en: '{destino}'")
 
-    def guardar_modelo(
-        self, ruta_archivo: Path, epoca_actual: int, historial_perdida: list
-    ) -> None:
-        """
-        Guarda el estado completo del modelo y su entrenamiento en un archivo comprimido .npz.
-        :param ruta_archivo: Ruta donde almacenar el archivo .npz.
-        :param epoca_actual: Numero de la epoca completada.
-        :param historial_perdida: Lista de valores de perdida por epoca.
-        """
-        ruta_archivo = Path(ruta_archivo)
-        ruta_archivo.parent.mkdir(parents=True, exist_ok=True)
 
-        # Convertir arreglos de CuPy a NumPy antes de guardar
-        if USAR_CUPY:
-            pesos_entrada_np = cp.asnumpy(self.matriz_pesos_entrada)
-            pesos_salida_np = cp.asnumpy(self.matriz_pesos_salida)
-            dist_unigrama_np = (
-                cp.asnumpy(self.distribucion_unigrama)
-                if hasattr(self, "distribucion_unigrama") and self.distribucion_unigrama is not None
-                else None
-            )
-        else:
-            pesos_entrada_np = self.matriz_pesos_entrada
-            pesos_salida_np = self.matriz_pesos_salida
-            dist_unigrama_np = getattr(self, "distribucion_unigrama", None)
+def cargar_modelo(ruta_archivo: str | Path) -> dict:
+    """
+    Carga y restaura el estado del modelo desde un archivo comprimido .npz.
 
-        datos_guardar = {
-            "matriz_pesos_entrada": pesos_entrada_np,
-            "matriz_pesos_salida": pesos_salida_np,
-            "epoca_actual": epoca_actual,
-            "historial_perdida": np.array(historial_perdida),
-            "tamanio_vocabulario": self.tamanio_vocabulario,
-            "dimension_embedding": self.dimension_embedding,
-            "muestreo_negativo": self.muestreo_negativo,
-            "cantidad_muestras_negativas": self.cantidad_muestras_negativas,
-        }
-        if dist_unigrama_np is not None:
-            datos_guardar["distribucion_unigrama"] = dist_unigrama_np
+    :param ruta_archivo: Ruta al archivo .npz de respaldo.
+    :return: Diccionario con W, W_prima, vocabulario_palabras, epoca_actual e historial_perdida.
+    """
+    origen = Path(ruta_archivo)
+    if not origen.exists():
+        raise FileNotFoundError(f"No se encontro el archivo de modelo en: '{origen}'")
 
-        np.savez_compressed(
-            ruta_archivo,
-            **datos_guardar
-        )
-        print(f"Backup guardado exitosamente en: {ruta_archivo}")
+    datos = np.load(origen, allow_pickle=True)
+    W_np = datos["W"]
+    W_prima_np = datos["W_prima"]
 
-    def cargar_modelo(self, ruta_archivo: Path) -> tuple:
-        """
-        Carga el estado del modelo desde un archivo .npz.
-        :param ruta_archivo: Ruta al archivo de backup.
-        :return: Tupla (epoca_actual, historial_perdida).
-        """
-        datos = np.load(ruta_archivo)
-        pesos_entrada_np = datos["matriz_pesos_entrada"]
-        pesos_salida_np = datos["matriz_pesos_salida"]
+    W = xp.asarray(W_np, dtype=xp.float32)
+    W_prima = xp.asarray(W_prima_np, dtype=xp.float32)
+    vocabulario_palabras = datos["vocabulario_palabras"]
+    epoca_actual = int(datos.get("epoca_actual", 0))
+    historial_perdida = [float(v) for v in datos.get("historial_perdida", [])]
 
-        self.matriz_pesos_entrada = xp.asarray(pesos_entrada_np, dtype=xp.float32)
-        self.matriz_pesos_salida = xp.asarray(pesos_salida_np, dtype=xp.float32)
+    modelo = {
+        "W": W,
+        "W_prima": W_prima,
+        "vocabulario_palabras": vocabulario_palabras,
+        "epoca_actual": epoca_actual,
+        "historial_perdida": historial_perdida,
+        "tamanio_vocabulario": len(vocabulario_palabras),
+        "dimension_embedding": W.shape[1],
+    }
 
-        epoca_actual = int(datos["epoca_actual"])
-        historial_perdida = []
-        for valor in datos["historial_perdida"]:
-            historial_perdida.append(float(valor))
-
-        if "tamanio_vocabulario" in datos:
-            self.tamanio_vocabulario = int(datos["tamanio_vocabulario"])
-        if "dimension_embedding" in datos:
-            self.dimension_embedding = int(datos["dimension_embedding"])
-        if "muestreo_negativo" in datos:
-            self.muestreo_negativo = bool(datos["muestreo_negativo"])
-        if "cantidad_muestras_negativas" in datos:
-            self.cantidad_muestras_negativas = int(datos["cantidad_muestras_negativas"])
-        if "distribucion_unigrama" in datos:
-            self.distribucion_unigrama = xp.asarray(datos["distribucion_unigrama"], dtype=xp.float32)
-
-        print(f"Modelo CuPy/NumPy cargado desde {ruta_archivo}. Epoca reanudada: {epoca_actual} (Muestreo Negativo: {self.muestreo_negativo})")
-        return epoca_actual, historial_perdida
-
+    print(f"Modelo cargado exitosamente desde: '{origen}' (Epoca cargada: {epoca_actual})")
+    return modelo
