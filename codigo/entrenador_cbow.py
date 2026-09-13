@@ -1,6 +1,6 @@
 """
 Modulo de entrenamiento matricial para la red neuronal CBOW.
-Coordina la tokenizacion, construccion de vocabulario, matrices One-Hot x y t, y retropropagacion en GPU/CPU.
+Coordina la tokenizacion, construccion de vocabulario, matrices x y t, y retropropagacion en GPU/CPU.
 """
 
 import time
@@ -11,12 +11,10 @@ from tqdm import tqdm
 from .tokenizador import tokenizar_corpus
 from .generador_vocabulario import (
     construir_vocabulario,
-    generar_vectores_one_hot,
-    crear_matriz_one_hot_lote,
     construir_distribucion_unigrama,
-    generar_muestras_negativas,
 )
 from .modelo_cbow_cupy import (
+    crear_matrices_lote,
     inicializar_pesos,
     propagar_hacia_adelante,
     retropropagar_y_actualizar,
@@ -46,11 +44,13 @@ def imprimir_configuracion_entrenamiento(
     frecuencia_respaldo: int,
     directorio_respaldos: str | Path,
     semilla_aleatoria: int,
+    duracion_total_segundos: float | None = None,
 ) -> None:
     """
-    Imprime en formato estructurado la configuracion completa del entrenamiento al inicio.
+    Imprime en formato estructurado la configuracion completa del entrenamiento (al inicio o al finalizar).
     """
-    print("\n================ CONFIGURACIÓN DEL ENTRENAMIENTO ================")
+    titulo = "RESUMEN FINAL DE CONFIGURACIÓN Y RESULTADOS" if duracion_total_segundos is not None else "CONFIGURACIÓN DEL ENTRENAMIENTO"
+    print(f"\n================ {titulo} ================")
     print(f"Estado: {estado_reanudacion}")
     print(f"Ruta del corpus: {ruta_corpus}")
     print(f"Estrategia de tokenización: {estrategia_tokenizacion}")
@@ -73,24 +73,32 @@ def imprimir_configuracion_entrenamiento(
         print(f"Copias de respaldo: Activadas (Cada {frecuencia_respaldo} épocas en '{directorio_respaldos}')")
     else:
         print("Copias de respaldo: Desactivadas")
+    if duracion_total_segundos is not None:
+        minutos = int(duracion_total_segundos // 60)
+        segundos_resto = duracion_total_segundos % 60
+        if minutos > 0:
+            print(f"Tiempo total de entrenamiento: {duracion_total_segundos:.2f} s ({minutos} m {segundos_resto:.2f} s)")
+        else:
+            print(f"Tiempo total de entrenamiento: {duracion_total_segundos:.2f} s")
     print("=================================================================\n")
 
 
 def entrenar(configuracion_dict: dict) -> dict:
     """
-    Ejecuta el pipeline completo de entrenamiento matricial One-Hot para el modelo CBOW.
+    Ejecuta el pipeline completo de entrenamiento matricial para el modelo CBOW.
     Permite iniciar un entrenamiento limpio o reanudar desde una copia de respaldo (.npz).
 
     :param configuracion_dict: Diccionario que contiene todos los hiperparametros y rutas.
     :return: Diccionario 'modelo' con las matrices W, W_prima, vocabulario_palabras, historial_perdida y metadatos.
     """
+    tiempo_inicio_total = time.time()
+
     ruta_corpus = configuracion_dict.get("ruta_corpus", "datos/corpus.txt")
     directorio_respaldos = Path(configuracion_dict.get("directorio_respaldos", "respaldos"))
     estrategia_tokenizacion = configuracion_dict.get("estrategia_tokenizacion", "palabra")
     incluir_puntuacion_y_numeros = configuracion_dict.get("incluir_puntuacion_y_numeros", True)
     bpe_tamanio_vocabulario = configuracion_dict.get("bpe_tamanio_vocabulario", 15000)
     bpe_frecuencia_minima = configuracion_dict.get("bpe_frecuencia_minima", 2)
-    bpe_cantidad_fusiones = configuracion_dict.get("bpe_cantidad_fusiones", 1000)
     muestreo_negativo = configuracion_dict.get("muestreo_negativo", False)
     cantidad_muestras_negativas = configuracion_dict.get("cantidad_muestras_negativas", 5)
     tamanio_ventana = configuracion_dict.get("tamanio_ventana", 5)
@@ -106,7 +114,6 @@ def entrenar(configuracion_dict: dict) -> dict:
     token_desconocido = "<UNK>"
 
     print("\n--- Iniciando Pipeline de Entrenamiento CBOW Matricial ---")
-    modo_str = f"Muestreo Negativo (K={cantidad_muestras_negativas})" if muestreo_negativo else "Softmax Completa"
 
     # 1. Reanudacion directa desde Checkpoint o Inicialización Completa desde Corpus
     historial_perdida = []
@@ -123,6 +130,12 @@ def entrenar(configuracion_dict: dict) -> dict:
         historial_perdida = modelo_cargado["historial_perdida"]
         tamanio_vocabulario = len(vocabulario_palabras)
         estado_reanudacion = f"Reanudando desde checkpoint '{ruta_checkpoint}' (Época {epoca_inicial})"
+
+        print("\n[2/3] Tokenizando corpus de texto...")
+        tokens_corpus = tokenizar_corpus(
+            ruta_corpus=ruta_corpus,
+            incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
+        )
     else:
         print("\n[1/4] Tokenizando corpus de texto...")
         tokens_corpus = tokenizar_corpus(
@@ -138,7 +151,6 @@ def entrenar(configuracion_dict: dict) -> dict:
             incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
             bpe_tamanio_vocabulario=bpe_tamanio_vocabulario,
             bpe_frecuencia_minima=bpe_frecuencia_minima,
-            bpe_cantidad_fusiones=bpe_cantidad_fusiones,
             token_desconocido=token_desconocido,
         )
         tamanio_vocabulario = len(vocabulario_palabras)
@@ -149,7 +161,6 @@ def entrenar(configuracion_dict: dict) -> dict:
             semilla_aleatoria=semilla_aleatoria,
         )
         if muestreo_negativo:
-            # Inicializar W' aleatorio pequeño para romper la simetría de las sigmoides binarias
             xp.random.seed(semilla_aleatoria)
             W_prima = xp.random.uniform(
                 -0.1, 0.1, (dimension_embedding, tamanio_vocabulario)
@@ -175,48 +186,24 @@ def entrenar(configuracion_dict: dict) -> dict:
         semilla_aleatoria=semilla_aleatoria,
     )
 
-    # Re-tokenizar e indexar tokens solo si estamos realizando el ciclo de entrenamiento
-    print("\n[3/4] Indexando contextos y palabras objetivo...")
-    tokens_corpus = tokenizar_corpus(
-        ruta_corpus=ruta_corpus,
-        incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
-    )
-    mapeo_vocabulario = {palabra: indice for indice, palabra in enumerate(vocabulario_palabras)}
-    indice_desconocido = 0
-
-    indices_tokens = []
-    for token in tokens_corpus:
-        if token in mapeo_vocabulario:
-            indices_tokens.append(mapeo_vocabulario[token])
-        else:
-            indices_tokens.append(indice_desconocido)
+    # 3. Preparación de la distribución unigrama matricial
+    print("\n[3/4] Preparando representaciones matriciales del corpus...")
 
     distribucion_unigrama = None
     if muestreo_negativo:
         distribucion_unigrama = construir_distribucion_unigrama(
-            indices_tokens=indices_tokens,
-            tamanio_vocabulario=tamanio_vocabulario,
-            potencia=0.75,
+            tokens_corpus=tokens_corpus,
+            vocabulario_palabras=vocabulario_palabras,
         )
 
-    matriz_contextos_indice, matriz_objetivos_indice = generar_vectores_one_hot(
-        indices_tokens=indices_tokens,
-        tamanio_vocabulario=tamanio_vocabulario,
-        tamanio_ventana=tamanio_ventana,
-        tamanio_lote=tamanio_lote,
-    )
-    total_muestras = len(matriz_objetivos_indice)
+    total_muestras = max(0, len(tokens_corpus) - (2 * tamanio_ventana))
     cantidad_lotes = int(np.ceil(total_muestras / tamanio_lote))
     print(f"Total de muestras: {total_muestras:,} distribuidas en {cantidad_lotes:,} lotes.")
-
-    # Pre-cargar las matrices de índices directamente a VRAM (GPU)
-    vram_contextos_indice = xp.asarray(matriz_contextos_indice)
-    vram_objetivos_indice = xp.asarray(matriz_objetivos_indice)
 
     cantidad_palabras_contexto = float(2 * tamanio_ventana)
 
     # 4. Bucle Principal de Entrenamiento por Epocas
-    print("\n[4/4] Ejecutando bucle de entrenamiento...")
+    print("\n[4/4] Ejecutando bucle de entrenamiento matricial...")
     for epoca in range(epoca_inicial + 1, epoca_inicial + cantidad_epocas + 1):
         tiempo_inicio = time.time()
         perdida_acumulada = 0.0
@@ -229,37 +216,29 @@ def entrenar(configuracion_dict: dict) -> dict:
         )
 
         for indice_lote in barra_progreso:
-            indice_inicio_lote = indice_lote * tamanio_lote
-            indice_fin_lote = min(indice_inicio_lote + tamanio_lote, total_muestras)
+            posicion_inicio = indice_lote * tamanio_lote
+            posicion_fin = min(posicion_inicio + tamanio_lote + 2 * tamanio_ventana, len(tokens_corpus))
+            subconjunto_tokens_lote = tokens_corpus[posicion_inicio:posicion_fin]
 
-            sub_contextos_indice = vram_contextos_indice[indice_inicio_lote:indice_fin_lote]
-            sub_objetivos_indice = vram_objetivos_indice[indice_inicio_lote:indice_fin_lote]
-
-            matriz_contexto_x, matriz_objetivo_t = crear_matriz_one_hot_lote(
-                sub_contextos_indice=sub_contextos_indice,
-                sub_objetivos_indice=sub_objetivos_indice,
-                tamanio_vocabulario=tamanio_vocabulario,
+            matriz_contexto_x, matriz_objetivo_t = crear_matrices_lote(
+                subconjunto_tokens_lote=subconjunto_tokens_lote,
+                vocabulario_palabras=vocabulario_palabras,
+                tamanio_ventana=tamanio_ventana,
             )
 
             if muestreo_negativo:
-                indices_negativos = generar_muestras_negativas(
-                    matriz_objetivo_t=matriz_objetivo_t,
-                    distribucion_unigrama=distribucion_unigrama,
-                    cantidad_negativos=cantidad_muestras_negativas,
-                )
-
                 W, W_prima, perdida_lote = propagar_y_actualizar_muestreo_negativo(
                     x=matriz_contexto_x,
                     t=matriz_objetivo_t,
-                    indices_negativos=indices_negativos,
+                    distribucion_unigrama=distribucion_unigrama,
+                    cantidad_negativos=cantidad_muestras_negativas,
                     W=W,
                     W_prima=W_prima,
                     eta=tasa_aprendizaje,
                     C=cantidad_palabras_contexto,
                 )
-                del matriz_contexto_x, matriz_objetivo_t, indices_negativos
+                del matriz_contexto_x, matriz_objetivo_t
             else:
-                # Softmax Completa Estándar
                 matriz_oculta_h, matriz_excitacion_u, matriz_probabilidades_y = propagar_hacia_adelante(
                     x=matriz_contexto_x, W=W, W_prima=W_prima, C=cantidad_palabras_contexto
                 )
@@ -289,7 +268,6 @@ def entrenar(configuracion_dict: dict) -> dict:
             f"Tiempo: {duracion_epoca:.2f}s"
         )
 
-        # Autoguardado periodico de respaldos si hacer_respaldo es True
         if hacer_respaldo and (
             epoca % frecuencia_respaldo == 0 or epoca == (epoca_inicial + cantidad_epocas)
         ):
@@ -307,7 +285,29 @@ def entrenar(configuracion_dict: dict) -> dict:
             )
             guardar_modelo(modelo_temp, ruta_backup)
 
-    # Estructura del modelo retornado
+    duracion_total_segundos = time.time() - tiempo_inicio_total
+
+    imprimir_configuracion_entrenamiento(
+        estado_reanudacion=estado_reanudacion,
+        ruta_corpus=ruta_corpus,
+        estrategia_tokenizacion=estrategia_tokenizacion,
+        incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
+        bpe_tamanio_vocabulario=bpe_tamanio_vocabulario,
+        tamanio_diccionario_v=tamanio_vocabulario,
+        dimension_embedding=dimension_embedding,
+        tamanio_ventana=tamanio_ventana,
+        tasa_aprendizaje=tasa_aprendizaje,
+        muestreo_negativo=muestreo_negativo,
+        cantidad_muestras_negativas=cantidad_muestras_negativas,
+        tamanio_lote=tamanio_lote,
+        cantidad_epocas=cantidad_epocas,
+        hacer_respaldo=hacer_respaldo,
+        frecuencia_respaldo=frecuencia_respaldo,
+        directorio_respaldos=directorio_respaldos,
+        semilla_aleatoria=semilla_aleatoria,
+        duracion_total_segundos=duracion_total_segundos,
+    )
+
     modelo = {
         "W": W,
         "W_prima": W_prima,
@@ -315,6 +315,7 @@ def entrenar(configuracion_dict: dict) -> dict:
         "epoca_actual": epoca_inicial + cantidad_epocas,
         "historial_perdida": historial_perdida,
         "configuracion": configuracion_dict,
+        "duracion_total_segundos": duracion_total_segundos,
     }
 
     return modelo

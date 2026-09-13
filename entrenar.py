@@ -110,6 +110,14 @@ def main() -> None:
     print("                     ENTRENAMIENTO FINALIZADO CON ÉXITO                   ")
     print("==========================================================================")
     print(f"Pérdida final alcanzada: {modelo['historial_perdida'][-1]:.4f}")
+    if "duracion_total_segundos" in modelo:
+        duracion = modelo["duracion_total_segundos"]
+        minutos = int(duracion // 60)
+        segundos_resto = duracion % 60
+        if minutos > 0:
+            print(f"Tiempo total transcurrido: {duracion:.2f} s ({minutos} m {segundos_resto:.2f} s)")
+        else:
+            print(f"Tiempo total transcurrido: {duracion:.2f} s")
     print(f"Ubicación del modelo: '{ruta_guardado_final}'")
 
 

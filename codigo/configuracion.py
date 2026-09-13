@@ -22,7 +22,6 @@ def cargar_configuracion(ruta_yaml: str | Path = "configuracion.yaml") -> dict:
         "incluir_puntuacion_y_numeros": True,
         "bpe_tamanio_vocabulario": 15000,
         "bpe_frecuencia_minima": 2,
-        "bpe_cantidad_fusiones": 1000,
         "muestreo_negativo": False,
         "cantidad_muestras_negativas": 5,
         "tamanio_ventana": 5,
