@@ -70,7 +70,7 @@ Para entrenar el modelo con tu propio corpus de texto o con el archivo provisto 
    ```
 
 ### 2. Parámetros Principales de Entrenamiento
-- **`estrategia_tokenizacion`**: `'palabra'` (utiliza la totalidad de palabras por orden de aparición) o `'bpe'` (Byte Pair Encoding según la diapositiva 39 de `Fragmentación.pdf`).
+- **`estrategia_tokenizacion`**: `'palabra'` (utiliza la totalidad de palabras por orden de aparición) o `'bpe'` (Byte Pair Encoding).
 - **`tamanio_ventana`**: Tamaño de la ventana de contexto $C/2$ a izquierda y a derecha (ej. `5` para un contexto total $C = 10$).
 - **`dimension_embedding`**: Dimensión de la capa oculta o vector de embedding $N$ (ej. `100`).
 - **`tasa_aprendizaje`**: Tasa de aprendizaje $\eta$ para la actualización de gradientes (ej. `0.2`).
@@ -87,7 +87,17 @@ Para entrenar el modelo con tu propio corpus de texto o con el archivo provisto 
   - Pérdida: $E = -\log(\sigma(u_{\text{objetivo}})) - \sum_{p_n \in P_{\text{negativos}}} \log(\sigma(-u_n))$.
 
 ### 4. Tamaño de Lote (Batch Size)
-El parámetro `tamanio_lote` se configura en potencias de 2 (ej. `512`, `1024`, `2048`) para optimizar el cómputo matricial en GPU.
+El parámetro `tamanio_lote` se configura preferentemente en potencias de 2 (ej. `512`, `1024`, `2048`, `4096`) para maximizar el aprovechamiento del paralelismo matricial en la GPU.
+
+#### Sugerencias de `tamanio_lote` según la VRAM de la GPU:
+
+| VRAM de la GPU | Tamaño de Lote Recomendado (`tamanio_lote`) | Consideraciones |
+| :--- | :---: | :--- |
+| **< 4 GB** (GPUs de entrada / integradas) | `256` - `512` | Previene errores de memoria excesiva (*Out of Memory* - OOM), especialmente usando Softmax completo. |
+| **4 GB – 8 GB** (GPUs gama media) | `1024` - `2048` | Ofrece un equilibrio óptimo entre velocidad de cómputo y consumo de memoria. |
+| **8 GB – 16 GB+** (GPUs gama alta) | `4096` - `8192` | Maximiza el rendimiento de CuPy y reduce drásticamente el tiempo de entrenamiento por época. |
+
+> **Nota sobre Muestreo Negativo (`muestreo_negativo: true`)**: El uso de Muestreo Negativo reduce drásticamente la huella de memoria VRAM frente a Softmax completo, lo que permite utilizar lotes más grandes aun en placas con menor VRAM disponible.
 
 ---
 
