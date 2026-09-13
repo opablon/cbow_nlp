@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script de ejecucion autonoma para el entrenamiento de la red neuronal CBOW mediante funciones puras.
+Script de ejecucion autonoma para el entrenamiento de la red neuronal CBOW.
 Permite iniciar un entrenamiento desde cero o reanudar un checkpoint (.npz) desde la terminal.
 """
 
@@ -95,7 +95,7 @@ def main() -> None:
     # 2. Ejecucion del entrenamiento matricial
     modelo = entrenar(configuracion)
 
-    # 3. Guardado atomico final del modelo entrenado
+    # 3. Guardado final del modelo si no fue resguardado durante las épocas
     directorio_respaldos = Path(configuracion.get("directorio_respaldos", "respaldos"))
     tamanio_ventana = configuracion.get("tamanio_ventana", 5)
     epoca_final = modelo.get("epoca_actual", configuracion.get("cantidad_epocas", 10))
@@ -103,13 +103,14 @@ def main() -> None:
     ruta_guardado_final = (
         directorio_respaldos / f"modelo_cbow_w{tamanio_ventana}_epoca_{epoca_final}.npz"
     )
-    guardar_modelo(modelo, ruta_guardado_final)
+    if not ruta_guardado_final.exists():
+        guardar_modelo(modelo, ruta_guardado_final)
 
     print("\n==========================================================================")
-    print("                     ENTRENAMIENTO FINALIZADO CON EXITO                  ")
+    print("                     ENTRENAMIENTO FINALIZADO CON ÉXITO                   ")
     print("==========================================================================")
-    print(f"Perdida final alcanzada: {modelo['historial_perdida'][-1]:.4f}")
-    print(f"Modelo resguardado exitosamente en: '{ruta_guardado_final}'")
+    print(f"Pérdida final alcanzada: {modelo['historial_perdida'][-1]:.4f}")
+    print(f"Ubicación del modelo: '{ruta_guardado_final}'")
 
 
 if __name__ == "__main__":

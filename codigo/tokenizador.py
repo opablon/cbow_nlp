@@ -1,5 +1,5 @@
 """
-Modulo de tokenizacion para el preprocesamiento de textos y corpora mediante funciones puras.
+Modulo de tokenizacion para el preprocesamiento de textos y corpora.
 """
 
 import re
@@ -31,4 +31,11 @@ def tokenizar_corpus(
         # Regex que captura exclusivamente palabras alfabeticas con tildes y ñ
         patron = re.compile(r"[a-záéíóúüñ]+", re.IGNORECASE)
 
-    return patron.findall(contenido)
+    tokens = patron.findall(contenido)
+    if not tokens:
+        raise ValueError(
+            f"El corpus en la ruta '{path_corpus}' no contiene suficiente texto para entrenar (0 tokens)."
+        )
+
+    return tokens
+

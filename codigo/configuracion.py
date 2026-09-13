@@ -1,5 +1,5 @@
 """
-Modulo de configuracion del modelo CBOW mediante funciones puras.
+Modulo de configuracion del modelo CBOW.
 Permite cargar y guardar hiperparametros desde y hacia archivos YAML.
 """
 
@@ -20,9 +20,6 @@ def cargar_configuracion(ruta_yaml: str | Path = "configuracion.yaml") -> dict:
         "directorio_respaldos": "respaldos",
         "estrategia_tokenizacion": "palabra",
         "incluir_puntuacion_y_numeros": True,
-        "criterio_seleccion_vocabulario": "porcentaje_palabras",
-        "cantidad_palabras_unicas": 15000,
-        "porcentaje_palabras_unicas": 1.0,
         "bpe_tamanio_vocabulario": 15000,
         "bpe_frecuencia_minima": 2,
         "bpe_cantidad_fusiones": 1000,
@@ -44,9 +41,8 @@ def cargar_configuracion(ruta_yaml: str | Path = "configuracion.yaml") -> dict:
     if path_yaml.exists():
         with open(path_yaml, "r", encoding="utf-8") as archivo:
             datos_cargados = yaml.safe_load(archivo)
-            if datos_cargados is not None and isinstance(datos_cargados, dict):
-                for clave, valor in datos_cargados.items():
-                    configuracion_por_defecto[clave] = valor
+            if isinstance(datos_cargados, dict):
+                configuracion_por_defecto.update(datos_cargados)
 
     return configuracion_por_defecto
 

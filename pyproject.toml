@@ -9,7 +9,6 @@ description = "Trabajo Practico 1: Redes Neuronales CBOW para Procesamiento de L
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "torch",
     "cupy-cuda12x",
     "numpy",
     "pandas",
@@ -21,3 +20,8 @@ dependencies = [
     "tqdm",
     "pyyaml",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["codigo*"]
+
