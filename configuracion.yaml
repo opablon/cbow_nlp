@@ -21,9 +21,6 @@ bpe_tamanio_vocabulario: 15000
 # Frecuencia mínima para incluir un par de tokens en el vocabulario BPE (solo se aplica si estrategia_tokenizacion es 'bpe', ejemplo: 2)
 bpe_frecuencia_minima: 2
 
-# Cantidad máxima de fusiones BPE (solo se aplica si estrategia_tokenizacion es 'bpe', ejemplo: 500, 1000)
-bpe_cantidad_fusiones: 1000
-
 # Activar Muestreo Negativo (Negative Sampling): true o false
 muestreo_negativo: true
 
