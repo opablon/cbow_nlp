@@ -15,7 +15,6 @@ if str(ruta_raiz) not in sys.path:
 
 from codigo.configuracion import cargar_configuracion
 from codigo.entrenador_cbow import entrenar
-from codigo.modelo_cbow_cupy import guardar_modelo
 
 
 def parsear_argumentos() -> argparse.Namespace:
@@ -95,17 +94,7 @@ def main() -> None:
     # 2. Ejecucion del entrenamiento matricial
     modelo = entrenar(configuracion)
 
-    # 3. Guardado final del modelo si no fue resguardado durante las épocas
-    directorio_respaldos = Path(configuracion.get("directorio_respaldos", "respaldos"))
-    tamanio_ventana = configuracion.get("tamanio_ventana", 5)
-    epoca_final = modelo.get("epoca_actual", configuracion.get("cantidad_epocas", 10))
-
-    ruta_guardado_final = (
-        directorio_respaldos / f"modelo_cbow_w{tamanio_ventana}_epoca_{epoca_final}.npz"
-    )
-    if not ruta_guardado_final.exists():
-        guardar_modelo(modelo, ruta_guardado_final)
-
+    # 3. Resumen final del entrenamiento
     print("\n==========================================================================")
     print("                     ENTRENAMIENTO FINALIZADO CON ÉXITO                   ")
     print("==========================================================================")
@@ -118,7 +107,16 @@ def main() -> None:
             print(f"Tiempo total transcurrido: {duracion:.2f} s ({minutos} m {segundos_resto:.2f} s)")
         else:
             print(f"Tiempo total transcurrido: {duracion:.2f} s")
-    print(f"Ubicación del modelo: '{ruta_guardado_final}'")
+
+    hacer_respaldo = configuracion.get("hacer_respaldo", True)
+    frecuencia_respaldo = configuracion.get("frecuencia_respaldo", 2)
+    directorio_respaldos = configuracion.get("directorio_respaldos", "respaldos")
+
+    if hacer_respaldo:
+        print(f"Copias de respaldo: Activadas (frecuencia: cada {frecuencia_respaldo} épocas en '{directorio_respaldos}')")
+    else:
+        print("Copias de respaldo: Desactivadas")
+    print("==========================================================================")
 
 
 if __name__ == "__main__":

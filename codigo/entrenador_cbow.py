@@ -99,10 +99,12 @@ def entrenar(configuracion_dict: dict) -> dict:
     # 1. Reanudacion directa desde Checkpoint o Inicialización Completa desde Corpus
     historial_perdida = []
     epoca_inicial = 0
+    es_reanudacion = False
     estado_reanudacion = "Iniciando entrenamiento limpio desde corpus"
 
     if reanudar_entrenamiento and Path(ruta_checkpoint).exists():
-        print("\n[1/3] Cargando modelo y vocabulario desde archivo de respaldo checkpoint...")
+        es_reanudacion = True
+        print(f"\n[1/3] Cargando modelo y vocabulario desde archivo de respaldo '{ruta_checkpoint}'...")
         modelo_cargado = cargar_modelo(ruta_checkpoint)
         W = modelo_cargado["W"]
         W_prima = modelo_cargado["W_prima"]
@@ -117,19 +119,22 @@ def entrenar(configuracion_dict: dict) -> dict:
             ruta_corpus=ruta_corpus,
             incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
         )
+        print(f"Tokens totales extraídos del corpus: {len(tokens_corpus):,}")
     else:
-        print("\n[1/4 y 2/4] Procesando corpus y construyendo vocabulario...")
+        print("\n[1/4] Tokenizando corpus de texto...")
         tokens_corpus = tokenizar_corpus(
             ruta_corpus=ruta_corpus,
             incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
         )
+        print(f"Tokens totales extraídos del corpus: {len(tokens_corpus):,}")
+
+        print("\n[2/4] Construyendo vocabulario de palabras...")
         vocabulario_palabras = construir_vocabulario(
             ruta_corpus=ruta_corpus,
             incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
             token_desconocido=token_desconocido,
         )
         tamanio_vocabulario = len(vocabulario_palabras)
-        print(f"Tokens totales extraidos del corpus: {len(tokens_corpus):,}")
 
         W, W_prima = inicializar_pesos(
             tamanio_vocabulario=tamanio_vocabulario,
@@ -154,7 +159,8 @@ def entrenar(configuracion_dict: dict) -> dict:
     )
 
     # 3. Preparación de las representaciones del corpus
-    print("\n[3/4] Preparando representaciones matriciales del corpus...")
+    if not es_reanudacion:
+        print("[3/4] Preparando representaciones matriciales del corpus...")
 
     total_muestras = max(0, len(tokens_corpus) - (2 * tamanio_ventana))
     cantidad_lotes = int(np.ceil(total_muestras / tamanio_lote))
@@ -163,8 +169,9 @@ def entrenar(configuracion_dict: dict) -> dict:
     cantidad_palabras_contexto = float(2 * tamanio_ventana)
     mapeo_vocabulario = {palabra: indice for indice, palabra in enumerate(vocabulario_palabras)}
 
-    # 4. Bucle Principal de Entrenamiento por Epocas
-    print("\n[4/4] Ejecutando bucle de entrenamiento matricial...")
+    # 4. Bucle Principal de Entrenamiento por Épocas
+    paso_bucle_txt = "[3/3]" if es_reanudacion else "[4/4]"
+    print(f"\n{paso_bucle_txt} Ejecutando bucle de entrenamiento matricial...")
     for epoca in range(epoca_inicial + 1, epoca_inicial + cantidad_epocas + 1):
         tiempo_inicio = time.time()
         perdida_acumulada = 0.0
@@ -219,9 +226,8 @@ def entrenar(configuracion_dict: dict) -> dict:
             f"Tiempo: {duracion_epoca:.2f}s"
         )
 
-        if hacer_respaldo and (
-            epoca % frecuencia_respaldo == 0 or epoca == (epoca_inicial + cantidad_epocas)
-        ):
+        # Copia de seguridad periódica basada únicamente en la configuración de parámetros
+        if hacer_respaldo and (epoca % frecuencia_respaldo == 0):
             modelo_temp = {
                 "W": W,
                 "W_prima": W_prima,
