@@ -16,7 +16,6 @@ dependencies = [
     "seaborn",
     "jupyter",
     "ipykernel",
-    "tokenizers",
     "tqdm",
     "pyyaml",
 ]

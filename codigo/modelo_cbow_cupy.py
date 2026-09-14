@@ -80,40 +80,6 @@ def crear_matrices_lote(
     return matriz_contexto_x, matriz_objetivo_t
 
 
-def generar_matriz_muestra_negativa(
-    matriz_objetivo_t: xp.ndarray,
-    distribucion_unigrama: xp.ndarray,
-) -> xp.ndarray:
-    """
-    Genera una matriz de muestras negativas de forma (L, |V|) mediante muestreo vectorizado.
-
-    :param matriz_objetivo_t: Matriz de la palabra objetivo deseada (L x |V|).
-    :param distribucion_unigrama: Distribucion de probabilidad unigrama P(w)^0.75 de forma (|V|,).
-    :return: Matriz de muestras negativas de forma (L, |V|).
-    """
-    L, V = matriz_objetivo_t.shape
-    vector_probabilidades = xp.asarray(distribucion_unigrama)
-
-    indices_muestras_negativas = xp.random.choice(V, size=L, p=vector_probabilidades).astype(xp.int32)
-    matriz_muestra_negativa = xp.zeros((L, V), dtype=xp.float32)
-    matriz_muestra_negativa[xp.arange(L), indices_muestras_negativas] = 1.0
-
-    coincidencias = (xp.sum(matriz_muestra_negativa * matriz_objetivo_t, axis=1) > 0.0)
-    intentos = 0
-    while xp.any(coincidencias) and intentos < 5:
-        cantidad_faltantes = int(xp.sum(coincidencias))
-        reemplazos = xp.random.choice(V, size=cantidad_faltantes, p=vector_probabilidades).astype(xp.int32)
-        indices_coincidentes = xp.where(coincidencias)[0]
-
-        matriz_muestra_negativa[indices_coincidentes] = 0.0
-        matriz_muestra_negativa[indices_coincidentes, reemplazos] = 1.0
-
-        coincidencias = (xp.sum(matriz_muestra_negativa * matriz_objetivo_t, axis=1) > 0.0)
-        intentos += 1
-
-    return matriz_muestra_negativa
-
-
 def inicializar_pesos(
     tamanio_vocabulario: int, dimension_embedding: int, semilla_aleatoria: int = 26
 ) -> tuple[xp.ndarray, xp.ndarray]:
@@ -218,90 +184,12 @@ def retropropagar_y_actualizar(
     EH = xp.dot(e, W_prima.T)
 
     # Actualizacion de W': W' = W' - eta * (h^T * e) / L  ->  Forma: (N, |V|)
-    gradiente_W_prima = xp.dot(h.T, e) / L
-    W_prima -= eta * gradiente_W_prima
+    delta_W_prima = xp.dot(h.T, e) / L
+    W_prima -= eta * delta_W_prima
 
     # Actualizacion de W: W = W - eta * (1 / C) * (x^T * EH) / L  ->  Forma: (|V|, N)
-    gradiente_W = xp.dot(x.T, EH) / (L * C)
-    W -= eta * gradiente_W
-
-    return W, W_prima, perdida_promedio
-
-
-def propagar_y_actualizar_muestreo_negativo(
-    x: xp.ndarray,
-    t: xp.ndarray,
-    distribucion_unigrama: xp.ndarray,
-    cantidad_negativos: int,
-    W: xp.ndarray,
-    W_prima: xp.ndarray,
-    eta: float,
-    C: float = 1.0,
-) -> tuple[xp.ndarray, xp.ndarray, float]:
-    """
-    Propagacion hacia adelante y retropropagacion para el modelo CBOW utilizando Muestreo Negativo.
-
-    :param x: Matriz de contexto (L x |V|).
-    :param t: Matriz de la palabra objetivo deseada (L x |V|).
-    :param distribucion_unigrama: Distribucion de probabilidad unigrama P(w)^0.75 de forma (|V|,).
-    :param cantidad_negativos: Cantidad de palabras de ruido muestreadas por ejemplo.
-    :param W: Matriz de pesos de entrada (|V| x N).
-    :param W_prima: Matriz de pesos de salida (N x |V|).
-    :param eta: Tasa de aprendizaje.
-    :param C: Cantidad de palabras en el contexto de entrada (2 * tamanio_ventana).
-    :return: Tupla (W, W_prima, perdida_promedio).
-    """
-    L = x.shape[0]
-
-    # h = (1 / C) * x * W  -> Forma: (L, N)
-    h = (1.0 / C) * xp.dot(x, W)
-
-    # Vector de salida de la palabra objetivo deseada obtenido via multiplicacion matricial -> Forma: (L, N)
-    vector_salida_palabra_objetivo = xp.dot(t, W_prima.T)
-
-    # Excitacion para la palabra objetivo deseada u_objetivo = sum(h * vector_salida_palabra_objetivo) -> Forma: (L, 1)
-    excitacion_palabra_objetivo = xp.sum(h * vector_salida_palabra_objetivo, axis=1, keepdims=True)
-    activacion_sigmoide_palabra_objetivo = 1.0 / (1.0 + xp.exp(-excitacion_palabra_objetivo))
-
-    # Error de salida para la palabra objetivo deseada (t_deseado = 1.0) -> Forma: (L, 1)
-    error_palabra_objetivo = activacion_sigmoide_palabra_objetivo - 1.0
-
-    # Acumuladores matriciales de error retropropagado (EH) y gradiente (W')
-    EH = error_palabra_objetivo * vector_salida_palabra_objetivo  # Forma: (L, N)
-    gradiente_W_prima = xp.dot(h.T, error_palabra_objetivo * t)  # Forma: (N, |V|)
-
-    perdida_palabra_objetivo = -xp.log(activacion_sigmoide_palabra_objetivo + 1e-12)
-    perdida_muestras_negativas = 0.0
-
-    # Procesar cada una de las palabras de ruido/muestras negativas
-    for _ in range(cantidad_negativos):
-        matriz_muestra_negativa = generar_matriz_muestra_negativa(
-            matriz_objetivo_t=t,
-            distribucion_unigrama=distribucion_unigrama,
-        )  # Forma: (L, |V|)
-
-        vector_salida_muestra_negativa = xp.dot(matriz_muestra_negativa, W_prima.T)  # Forma: (L, N)
-        excitacion_muestra_negativa = xp.sum(h * vector_salida_muestra_negativa, axis=1, keepdims=True)  # Forma: (L, 1)
-        activacion_sigmoide_muestra_negativa = 1.0 / (1.0 + xp.exp(-excitacion_muestra_negativa))
-
-        # Error de salida para la palabra de ruido/muestra negativa (t_deseado = 0.0) -> Forma: (L, 1)
-        error_muestra_negativa = activacion_sigmoide_muestra_negativa - 0.0
-
-        EH += error_muestra_negativa * vector_salida_muestra_negativa
-        gradiente_W_prima += xp.dot(h.T, error_muestra_negativa * matriz_muestra_negativa)
-
-        perdida_muestras_negativas += -xp.log(1.0 - activacion_sigmoide_muestra_negativa + 1e-12)
-
-        del matriz_muestra_negativa
-
-    perdida_promedio = float(xp.mean(perdida_palabra_objetivo + perdida_muestras_negativas))
-
-    # Actualizacion de W' mediante suma de gradientes matriciales
-    W_prima -= (eta / L) * gradiente_W_prima
-
-    # Actualizacion de W: W = W - eta * (1 / C) * (x^T * EH) / L -> Forma: (|V|, N)
-    gradiente_W = xp.dot(x.T, EH) / (L * C)
-    W -= eta * gradiente_W
+    delta_W = xp.dot(x.T, EH) / (L * C)
+    W -= eta * delta_W
 
     return W, W_prima, perdida_promedio
 

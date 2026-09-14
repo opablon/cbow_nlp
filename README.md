@@ -47,7 +47,7 @@ cbow_nlp/
 └── codigo/                                 # Modulos Python reutilizables
     ├── __init__.py                         # Identificador del paquete de Python
     ├── configuracion.py                    # Carga y guardado de hiperparametros YAML
-    ├── tokenizador.py                      # Tokenizacion por Palabra (Regex) y BPE
+    ├── tokenizador.py                      # Tokenizacion por Palabra (Regex)
     ├── generador_vocabulario.py            # Construccion del vocabulario y matrices One-Hot (x y t)
     ├── modelo_cbow_cupy.py                 # Red CBOW matricial acelerada por GPU (CuPy / NumPy)
     └── entrenador_cbow.py                  # Bucle de entrenamiento por lotes y resguardos
@@ -70,21 +70,17 @@ Para entrenar el modelo con tu propio corpus de texto o con el archivo provisto 
    ```
 
 ### 2. Parámetros Principales de Entrenamiento
-- **`estrategia_tokenizacion`**: `'palabra'` (utiliza la totalidad de palabras por orden de aparición) o `'bpe'` (Byte Pair Encoding).
+- **`incluir_puntuacion_y_numeros`**: Incluir signos de puntuación y números en la tokenización (`true` o `false`).
 - **`tamanio_ventana`**: Tamaño de la ventana de contexto $C/2$ a izquierda y a derecha (ej. `5` para un contexto total $C = 10$).
 - **`dimension_embedding`**: Dimensión de la capa oculta o vector de embedding $N$ (ej. `100`).
 - **`tasa_aprendizaje`**: Tasa de aprendizaje $\eta$ para la actualización de gradientes (ej. `0.2`).
 - **`cantidad_epocas`**: Número total de épocas de entrenamiento (ej. `10`).
 
-### 3. Muestreo Negativo (Negative Sampling) vs Softmax Completo
-- **Softmax Completo (Predeterminado)**:
-  - Salida: $y = \text{softmax}(u) \in \mathbb{R}^{B \times |V|}$.
-  - Error: $e = y - t \in \mathbb{R}^{B \times |V|}$.
-  - Pérdida: $E = -\log(y_{\text{objetivo}})$.
-- **Muestreo Negativo (`muestreo_negativo: true`)**:
-  - Salida: Función logística $\sigma(u_j) = \frac{1}{1 + e^{-u_j}}$ sobre $P_{\text{sel}} = \{p_{\text{objetivo}}\} \cup P_{\text{negativos}}$.
-  - Error: $e_j = \sigma(u_j) - t_j$ para $j \in P_{\text{sel}}$ ($t_{\text{objetivo}} = 1$, $t_{\text{negativo}} = 0$), y $e_j = 0$ para $j \notin P_{\text{sel}}$.
-  - Pérdida: $E = -\log(\sigma(u_{\text{objetivo}})) - \sum_{p_n \in P_{\text{negativos}}} \log(\sigma(-u_n))$.
+### 3. Modelo de Salida: Softmax Completo
+El modelo calcula las probabilidades Softmax sobre la totalidad del vocabulario $|V|$:
+- Salida: $y = \text{softmax}(u) \in \mathbb{R}^{B \times |V|}$.
+- Error: $e = y - t \in \mathbb{R}^{B \times |V|}$.
+- Pérdida: $E = -\log(y_{\text{objetivo}})$.
 
 ### 4. Tamaño de Lote (Batch Size)
 El parámetro `tamanio_lote` se configura preferentemente en potencias de 2 (ej. `512`, `1024`, `2048`, `4096`) para maximizar el aprovechamiento del paralelismo matricial en la GPU.
@@ -93,11 +89,9 @@ El parámetro `tamanio_lote` se configura preferentemente en potencias de 2 (ej.
 
 | VRAM de la GPU | Tamaño de Lote Recomendado (`tamanio_lote`) | Consideraciones |
 | :--- | :---: | :--- |
-| **< 4 GB** (GPUs de entrada / integradas) | `256` - `512` | Previene errores de memoria excesiva (*Out of Memory* - OOM), especialmente usando Softmax completo. |
+| **< 4 GB** (GPUs de entrada / integradas) | `256` - `512` | Previene errores de memoria excesiva (*Out of Memory* - OOM). |
 | **4 GB – 8 GB** (GPUs gama media) | `1024` - `2048` | Ofrece un equilibrio óptimo entre velocidad de cómputo y consumo de memoria. |
 | **8 GB – 16 GB+** (GPUs gama alta) | `4096` - `8192` | Maximiza el rendimiento de CuPy y reduce drásticamente el tiempo de entrenamiento por época. |
-
-> **Nota sobre Muestreo Negativo (`muestreo_negativo: true`)**: El uso de Muestreo Negativo reduce drásticamente la huella de memoria VRAM frente a Softmax completo, lo que permite utilizar lotes más grandes aun en placas con menor VRAM disponible.
 
 ---
 

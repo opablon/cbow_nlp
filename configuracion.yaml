@@ -9,23 +9,8 @@ ruta_corpus: datos/corpus.txt
 # Directorio donde se guardarán las copias de respaldo en formato .npz (ejemplo: 'respaldos')
 directorio_respaldos: respaldos
 
-# Estrategia de tokenización y construcción del vocabulario: 'palabra' (palabras completas) o 'bpe' (Byte Pair Encoding)
-estrategia_tokenizacion: palabra
-
-# Incluir signos de puntuación, números y caracteres especiales (solo se aplica si estrategia_tokenizacion es 'palabra'): true o false
+# Incluir signos de puntuación, números y caracteres especiales: true o false
 incluir_puntuacion_y_numeros: true
-
-# Tamaño final del vocabulario BPE (solo se aplica si estrategia_tokenizacion es 'bpe', ejemplo: 5000, 15000)
-bpe_tamanio_vocabulario: 15000
-
-# Frecuencia mínima para incluir un par de tokens en el vocabulario BPE (solo se aplica si estrategia_tokenizacion es 'bpe', ejemplo: 2)
-bpe_frecuencia_minima: 2
-
-# Activar Muestreo Negativo (Negative Sampling): true o false
-muestreo_negativo: true
-
-# Cantidad de muestras negativas K por cada muestra positiva si muestreo_negativo es true (ejemplo: 5, 10)
-cantidad_muestras_negativas: 10
 
 # Tamaño de la ventana de contexto C/2 a izquierda y a derecha (ejemplo: 2, 4, 5)
 tamanio_ventana: 4

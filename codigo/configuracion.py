@@ -18,12 +18,7 @@ def cargar_configuracion(ruta_yaml: str | Path = "configuracion.yaml") -> dict:
     configuracion_por_defecto = {
         "ruta_corpus": "datos/corpus.txt",
         "directorio_respaldos": "respaldos",
-        "estrategia_tokenizacion": "palabra",
         "incluir_puntuacion_y_numeros": True,
-        "bpe_tamanio_vocabulario": 15000,
-        "bpe_frecuencia_minima": 2,
-        "muestreo_negativo": False,
-        "cantidad_muestras_negativas": 5,
         "tamanio_ventana": 5,
         "dimension_embedding": 100,
         "tasa_aprendizaje": 0.2,

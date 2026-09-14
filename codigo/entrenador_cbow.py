@@ -9,16 +9,12 @@ import numpy as np
 from tqdm import tqdm
 
 from .tokenizador import tokenizar_corpus
-from .generador_vocabulario import (
-    construir_vocabulario,
-    construir_distribucion_unigrama,
-)
+from .generador_vocabulario import construir_vocabulario
 from .modelo_cbow_cupy import (
     crear_matrices_lote,
     inicializar_pesos,
     propagar_hacia_adelante,
     retropropagar_y_actualizar,
-    propagar_y_actualizar_muestreo_negativo,
     guardar_modelo,
     cargar_modelo,
     USAR_CUPY,
@@ -29,15 +25,11 @@ from .modelo_cbow_cupy import (
 def imprimir_configuracion_entrenamiento(
     estado_reanudacion: str,
     ruta_corpus: str,
-    estrategia_tokenizacion: str,
     incluir_puntuacion_y_numeros: bool,
-    bpe_tamanio_vocabulario: int,
     tamanio_diccionario_v: int,
     dimension_embedding: int,
     tamanio_ventana: int,
     tasa_aprendizaje: float,
-    muestreo_negativo: bool,
-    cantidad_muestras_negativas: int,
     tamanio_lote: int,
     cantidad_epocas: int,
     hacer_respaldo: bool,
@@ -53,19 +45,13 @@ def imprimir_configuracion_entrenamiento(
     print(f"\n================ {titulo} ================")
     print(f"Estado: {estado_reanudacion}")
     print(f"Ruta del corpus: {ruta_corpus}")
-    print(f"Estrategia de tokenización: {estrategia_tokenizacion}")
     print(f"Incluir puntuación y números: {incluir_puntuacion_y_numeros}")
-    if estrategia_tokenizacion == "bpe":
-        print(f"Tamaño vocabulario BPE objetivo: {bpe_tamanio_vocabulario}")
     print(f"Tamaño final del vocabulario (|V|): {tamanio_diccionario_v:,}")
     print(f"Dimensión del embedding (N): {dimension_embedding}")
     C_total = 2 * tamanio_ventana
     print(f"Tamaño de ventana: {tamanio_ventana} palabras a cada lado (C = {C_total} palabras totales)")
     print(f"Tasa de aprendizaje (eta): {tasa_aprendizaje}")
-    if muestreo_negativo:
-        print(f"Muestreo negativo: Activado (K = {cantidad_muestras_negativas} muestras por ejemplo)")
-    else:
-        print("Muestreo negativo: Desactivado (Softmax Completa sobre todo |V|)")
+    print("Modo de aprendizaje: Softmax Completo sobre todo |V|")
     print(f"Tamaño del mini-lote (L): {tamanio_lote}")
     print(f"Cantidad total de épocas: {cantidad_epocas}")
     print(f"Semilla aleatoria: {semilla_aleatoria}")
@@ -95,12 +81,7 @@ def entrenar(configuracion_dict: dict) -> dict:
 
     ruta_corpus = configuracion_dict.get("ruta_corpus", "datos/corpus.txt")
     directorio_respaldos = Path(configuracion_dict.get("directorio_respaldos", "respaldos"))
-    estrategia_tokenizacion = configuracion_dict.get("estrategia_tokenizacion", "palabra")
     incluir_puntuacion_y_numeros = configuracion_dict.get("incluir_puntuacion_y_numeros", True)
-    bpe_tamanio_vocabulario = configuracion_dict.get("bpe_tamanio_vocabulario", 15000)
-    bpe_frecuencia_minima = configuracion_dict.get("bpe_frecuencia_minima", 2)
-    muestreo_negativo = configuracion_dict.get("muestreo_negativo", False)
-    cantidad_muestras_negativas = configuracion_dict.get("cantidad_muestras_negativas", 5)
     tamanio_ventana = configuracion_dict.get("tamanio_ventana", 5)
     dimension_embedding = configuracion_dict.get("dimension_embedding", 100)
     tasa_aprendizaje = configuracion_dict.get("tasa_aprendizaje", 0.2)
@@ -137,47 +118,33 @@ def entrenar(configuracion_dict: dict) -> dict:
             incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
         )
     else:
-        print("\n[1/4] Tokenizando corpus de texto...")
+        print("\n[1/4 y 2/4] Procesando corpus y construyendo vocabulario...")
         tokens_corpus = tokenizar_corpus(
             ruta_corpus=ruta_corpus,
             incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
         )
-        print(f"Tokens totales extraidos del corpus: {len(tokens_corpus):,}")
-
-        print("\n[2/4] Construyendo vocabulario de palabras...")
         vocabulario_palabras = construir_vocabulario(
             ruta_corpus=ruta_corpus,
-            estrategia_tokenizacion=estrategia_tokenizacion,
             incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
-            bpe_tamanio_vocabulario=bpe_tamanio_vocabulario,
-            bpe_frecuencia_minima=bpe_frecuencia_minima,
             token_desconocido=token_desconocido,
         )
         tamanio_vocabulario = len(vocabulario_palabras)
+        print(f"Tokens totales extraidos del corpus: {len(tokens_corpus):,}")
 
         W, W_prima = inicializar_pesos(
             tamanio_vocabulario=tamanio_vocabulario,
             dimension_embedding=dimension_embedding,
             semilla_aleatoria=semilla_aleatoria,
         )
-        if muestreo_negativo:
-            xp.random.seed(semilla_aleatoria)
-            W_prima = xp.random.uniform(
-                -0.1, 0.1, (dimension_embedding, tamanio_vocabulario)
-            ).astype(xp.float32)
 
     imprimir_configuracion_entrenamiento(
         estado_reanudacion=estado_reanudacion,
         ruta_corpus=ruta_corpus,
-        estrategia_tokenizacion=estrategia_tokenizacion,
         incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
-        bpe_tamanio_vocabulario=bpe_tamanio_vocabulario,
         tamanio_diccionario_v=tamanio_vocabulario,
         dimension_embedding=dimension_embedding,
         tamanio_ventana=tamanio_ventana,
         tasa_aprendizaje=tasa_aprendizaje,
-        muestreo_negativo=muestreo_negativo,
-        cantidad_muestras_negativas=cantidad_muestras_negativas,
         tamanio_lote=tamanio_lote,
         cantidad_epocas=cantidad_epocas,
         hacer_respaldo=hacer_respaldo,
@@ -186,15 +153,8 @@ def entrenar(configuracion_dict: dict) -> dict:
         semilla_aleatoria=semilla_aleatoria,
     )
 
-    # 3. Preparación de la distribución unigrama matricial
+    # 3. Preparación de las representaciones del corpus
     print("\n[3/4] Preparando representaciones matriciales del corpus...")
-
-    distribucion_unigrama = None
-    if muestreo_negativo:
-        distribucion_unigrama = construir_distribucion_unigrama(
-            tokens_corpus=tokens_corpus,
-            vocabulario_palabras=vocabulario_palabras,
-        )
 
     total_muestras = max(0, len(tokens_corpus) - (2 * tamanio_ventana))
     cantidad_lotes = int(np.ceil(total_muestras / tamanio_lote))
@@ -226,34 +186,21 @@ def entrenar(configuracion_dict: dict) -> dict:
                 tamanio_ventana=tamanio_ventana,
             )
 
-            if muestreo_negativo:
-                W, W_prima, perdida_lote = propagar_y_actualizar_muestreo_negativo(
-                    x=matriz_contexto_x,
-                    t=matriz_objetivo_t,
-                    distribucion_unigrama=distribucion_unigrama,
-                    cantidad_negativos=cantidad_muestras_negativas,
-                    W=W,
-                    W_prima=W_prima,
-                    eta=tasa_aprendizaje,
-                    C=cantidad_palabras_contexto,
-                )
-                del matriz_contexto_x, matriz_objetivo_t
-            else:
-                matriz_oculta_h, matriz_excitacion_u, matriz_probabilidades_y = propagar_hacia_adelante(
-                    x=matriz_contexto_x, W=W, W_prima=W_prima, C=cantidad_palabras_contexto
-                )
+            matriz_oculta_h, matriz_excitacion_u, matriz_probabilidades_y = propagar_hacia_adelante(
+                x=matriz_contexto_x, W=W, W_prima=W_prima, C=cantidad_palabras_contexto
+            )
 
-                W, W_prima, perdida_lote = retropropagar_y_actualizar(
-                    x=matriz_contexto_x,
-                    t=matriz_objetivo_t,
-                    h=matriz_oculta_h,
-                    y=matriz_probabilidades_y,
-                    W=W,
-                    W_prima=W_prima,
-                    eta=tasa_aprendizaje,
-                    C=cantidad_palabras_contexto,
-                )
-                del matriz_contexto_x, matriz_objetivo_t, matriz_oculta_h, matriz_excitacion_u, matriz_probabilidades_y
+            W, W_prima, perdida_lote = retropropagar_y_actualizar(
+                x=matriz_contexto_x,
+                t=matriz_objetivo_t,
+                h=matriz_oculta_h,
+                y=matriz_probabilidades_y,
+                W=W,
+                W_prima=W_prima,
+                eta=tasa_aprendizaje,
+                C=cantidad_palabras_contexto,
+            )
+            del matriz_contexto_x, matriz_objetivo_t, matriz_oculta_h, matriz_excitacion_u, matriz_probabilidades_y
 
             perdida_acumulada += perdida_lote
             barra_progreso.set_postfix({"Perdida": f"{perdida_lote:.4f}"})
@@ -290,15 +237,11 @@ def entrenar(configuracion_dict: dict) -> dict:
     imprimir_configuracion_entrenamiento(
         estado_reanudacion=estado_reanudacion,
         ruta_corpus=ruta_corpus,
-        estrategia_tokenizacion=estrategia_tokenizacion,
         incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
-        bpe_tamanio_vocabulario=bpe_tamanio_vocabulario,
         tamanio_diccionario_v=tamanio_vocabulario,
         dimension_embedding=dimension_embedding,
         tamanio_ventana=tamanio_ventana,
         tasa_aprendizaje=tasa_aprendizaje,
-        muestreo_negativo=muestreo_negativo,
-        cantidad_muestras_negativas=cantidad_muestras_negativas,
         tamanio_lote=tamanio_lote,
         cantidad_epocas=cantidad_epocas,
         hacer_respaldo=hacer_respaldo,
@@ -319,3 +262,4 @@ def entrenar(configuracion_dict: dict) -> dict:
     }
 
     return modelo
+
