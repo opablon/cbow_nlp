@@ -40,7 +40,7 @@ except Exception:
 
 def crear_matrices_lote(
     subconjunto_tokens_lote: list[str],
-    vocabulario_palabras: np.ndarray,
+    mapeo_vocabulario: dict[str, int],
     tamanio_ventana: int,
 ) -> tuple[xp.ndarray, xp.ndarray]:
     """
@@ -48,36 +48,32 @@ def crear_matrices_lote(
     a partir del subconjunto de tokens correspondientes.
 
     :param subconjunto_tokens_lote: Subconjunto de tokens de texto del mini-lote (incluyendo margenes de ventana).
-    :param vocabulario_palabras: Arreglo del vocabulario |V|.
+    :param mapeo_vocabulario: Diccionario de mapeo palabra -> indice.
     :param tamanio_ventana: Tamaño de ventana C/2 a izquierda y a derecha.
     :return: Tupla (matriz_contexto_x, matriz_objetivo_t) de forma (L, |V|).
     """
-    tamanio_vocabulario = len(vocabulario_palabras)
-    mapeo_vocabulario = {palabra: indice for indice, palabra in enumerate(vocabulario_palabras)}
+    tamanio_vocabulario = len(mapeo_vocabulario)
 
     limite_inicio = tamanio_ventana
     limite_fin = len(subconjunto_tokens_lote) - tamanio_ventana
 
     L = max(0, limite_fin - limite_inicio)
 
-    matriz_contexto_x = xp.zeros((L, tamanio_vocabulario), dtype=xp.float32)
-    matriz_objetivo_t = xp.zeros((L, tamanio_vocabulario), dtype=xp.float32)
+    matriz_contexto_x_cpu = np.zeros((L, tamanio_vocabulario), dtype=np.float32)
+    matriz_objetivo_t_cpu = np.zeros((L, tamanio_vocabulario), dtype=np.float32)
 
     for indice_lote, i in enumerate(range(limite_inicio, limite_fin)):
-        suma_contexto = xp.zeros(tamanio_vocabulario, dtype=xp.float32)
         for offset in range(-tamanio_ventana, tamanio_ventana + 1):
             if offset != 0:
                 token_contexto = subconjunto_tokens_lote[i + offset]
                 indice_activo = mapeo_vocabulario.get(token_contexto, 0)
-                suma_contexto[indice_activo] += 1.0
-
-        matriz_contexto_x[indice_lote] = suma_contexto
+                matriz_contexto_x_cpu[indice_lote, indice_activo] += 1.0
 
         token_objetivo = subconjunto_tokens_lote[i]
         indice_objetivo = mapeo_vocabulario.get(token_objetivo, 0)
-        matriz_objetivo_t[indice_lote, indice_objetivo] = 1.0
+        matriz_objetivo_t_cpu[indice_lote, indice_objetivo] = 1.0
 
-    return matriz_contexto_x, matriz_objetivo_t
+    return xp.asarray(matriz_contexto_x_cpu), xp.asarray(matriz_objetivo_t_cpu)
 
 
 def inicializar_pesos(
@@ -111,10 +107,10 @@ def inicializar_pesos(
 
 def propagar_hacia_adelante(
     x: xp.ndarray, W: xp.ndarray, W_prima: xp.ndarray, C: float = 1.0
-) -> tuple[xp.ndarray, xp.ndarray, xp.ndarray]:
+) -> tuple[xp.ndarray, xp.ndarray]:
     """
     Propagacion hacia adelante matricial para el lote de muestras.
-    Calcula el vector de la capa oculta h, las excitaciones de salida u y las probabilidades Softmax y.
+    Calcula el vector de la capa oculta h y las probabilidades Softmax y.
 
     Formulacion matricial:
     h = (1 / C) * x * W
@@ -125,7 +121,7 @@ def propagar_hacia_adelante(
     :param W: Matriz de pesos de entrada (|V| x N).
     :param W_prima: Matriz de pesos de salida (N x |V|).
     :param C: Numero de palabras en la ventana de contexto (2 * tamanio_ventana).
-    :return: Tupla (h, u, y) con las activaciones, excitaciones y probabilidades.
+    :return: Tupla (h, y) con las activaciones y probabilidades.
     """
     # h = (1 / C) * x * W  ->  Forma: (L, N)
     h = (1.0 / C) * xp.dot(x, W)
@@ -134,11 +130,13 @@ def propagar_hacia_adelante(
     u = xp.dot(h, W_prima)
 
     # y = softmax(u) estabilizada numericamente sobre todo el vocabulario |V|
-    u_estabilizada = u - xp.max(u, axis=1, keepdims=True)
-    exponenciales = xp.exp(u_estabilizada)
+    u -= xp.max(u, axis=1, keepdims=True)
+    exponenciales = xp.exp(u)
+    del u
     y = exponenciales / xp.sum(exponenciales, axis=1, keepdims=True)
+    del exponenciales
 
-    return h, u, y
+    return h, y
 
 
 def retropropagar_y_actualizar(
@@ -185,11 +183,15 @@ def retropropagar_y_actualizar(
 
     # Actualizacion de W': W' = W' - eta * (h^T * e) / L  ->  Forma: (N, |V|)
     delta_W_prima = xp.dot(h.T, e) / L
+    del e
     W_prima -= eta * delta_W_prima
+    del delta_W_prima
 
     # Actualizacion de W: W = W - eta * (1 / C) * (x^T * EH) / L  ->  Forma: (|V|, N)
     delta_W = xp.dot(x.T, EH) / (L * C)
+    del EH
     W -= eta * delta_W
+    del delta_W
 
     return W, W_prima, perdida_promedio
 

@@ -161,6 +161,7 @@ def entrenar(configuracion_dict: dict) -> dict:
     print(f"Total de muestras: {total_muestras:,} distribuidas en {cantidad_lotes:,} lotes.")
 
     cantidad_palabras_contexto = float(2 * tamanio_ventana)
+    mapeo_vocabulario = {palabra: indice for indice, palabra in enumerate(vocabulario_palabras)}
 
     # 4. Bucle Principal de Entrenamiento por Epocas
     print("\n[4/4] Ejecutando bucle de entrenamiento matricial...")
@@ -182,11 +183,11 @@ def entrenar(configuracion_dict: dict) -> dict:
 
             matriz_contexto_x, matriz_objetivo_t = crear_matrices_lote(
                 subconjunto_tokens_lote=subconjunto_tokens_lote,
-                vocabulario_palabras=vocabulario_palabras,
+                mapeo_vocabulario=mapeo_vocabulario,
                 tamanio_ventana=tamanio_ventana,
             )
 
-            matriz_oculta_h, matriz_excitacion_u, matriz_probabilidades_y = propagar_hacia_adelante(
+            matriz_oculta_h, matriz_probabilidades_y = propagar_hacia_adelante(
                 x=matriz_contexto_x, W=W, W_prima=W_prima, C=cantidad_palabras_contexto
             )
 
@@ -200,7 +201,10 @@ def entrenar(configuracion_dict: dict) -> dict:
                 eta=tasa_aprendizaje,
                 C=cantidad_palabras_contexto,
             )
-            del matriz_contexto_x, matriz_objetivo_t, matriz_oculta_h, matriz_excitacion_u, matriz_probabilidades_y
+            del matriz_contexto_x, matriz_objetivo_t, matriz_oculta_h, matriz_probabilidades_y
+
+            if USAR_CUPY and (indice_lote % 50 == 0):
+                xp.get_default_memory_pool().free_all_blocks()
 
             perdida_acumulada += perdida_lote
             barra_progreso.set_postfix({"Perdida": f"{perdida_lote:.4f}"})

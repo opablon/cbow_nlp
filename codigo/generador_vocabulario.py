@@ -23,12 +23,8 @@ def construir_vocabulario(
     :param token_desconocido: Token reservado para elementos fuera de vocabulario (por defecto '<UNK>').
     :return: Arreglo de NumPy unidimensional con las |V| cadenas de texto del vocabulario.
     """
-    path_corpus = Path(ruta_corpus)
-    if not path_corpus.exists():
-        raise FileNotFoundError(f"No se encontro el archivo del corpus en: '{path_corpus}'")
-
     tokens_corpus = tokenizar_corpus(
-        ruta_corpus=path_corpus,
+        ruta_corpus=ruta_corpus,
         incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
     )
     frecuencias = Counter(tokens_corpus)
