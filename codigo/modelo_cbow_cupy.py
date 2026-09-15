@@ -134,7 +134,6 @@ def propagar_hacia_adelante(
     exponenciales = xp.exp(u)
     del u
     y = exponenciales / xp.sum(exponenciales, axis=1, keepdims=True)
-    del exponenciales
 
     return h, y
 
@@ -220,8 +219,6 @@ def guardar_modelo(modelo: dict, ruta_archivo: str | Path) -> None:
         "vocabulario_palabras": np.asarray(vocabulario_palabras, dtype=object),
         "epoca_actual": int(modelo.get("epoca_actual", 0)),
         "historial_perdida": np.asarray(modelo.get("historial_perdida", []), dtype=np.float32),
-        "tamanio_vocabulario": int(len(vocabulario_palabras)),
-        "dimension_embedding": int(W_np.shape[1]),
     }
 
     if "configuracion" in modelo:

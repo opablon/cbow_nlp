@@ -92,11 +92,17 @@ def entrenar(configuracion_dict: dict) -> dict:
     semilla_aleatoria = configuracion_dict.get("semilla_aleatoria", 26)
     reanudar_entrenamiento = configuracion_dict.get("reanudar_entrenamiento", False)
     ruta_checkpoint = configuracion_dict.get("ruta_checkpoint", "respaldos/modelo_cbow_w5_epoca_10.npz")
-    token_desconocido = "<UNK>"
-
     print("\n--- Iniciando Pipeline de Entrenamiento CBOW Matricial ---")
 
-    # 1. Reanudacion directa desde Checkpoint o Inicialización Completa desde Corpus
+    # 1. Tokenización previa única del corpus de texto
+    print("\n[1/4] Tokenizando corpus de texto...")
+    tokens_corpus = tokenizar_corpus(
+        ruta_corpus=ruta_corpus,
+        incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
+    )
+    print(f"Tokens totales extraídos del corpus: {len(tokens_corpus):,}")
+
+    # 2. Reanudación desde Checkpoint o Inicialización de Pesos desde Corpus
     historial_perdida = []
     epoca_inicial = 0
     es_reanudacion = False
@@ -104,7 +110,7 @@ def entrenar(configuracion_dict: dict) -> dict:
 
     if reanudar_entrenamiento and Path(ruta_checkpoint).exists():
         es_reanudacion = True
-        print(f"\n[1/3] Cargando modelo y vocabulario desde archivo de respaldo '{ruta_checkpoint}'...")
+        print(f"\n[2/4] Cargando modelo y vocabulario desde archivo de respaldo '{ruta_checkpoint}'...")
         modelo_cargado = cargar_modelo(ruta_checkpoint)
         W = modelo_cargado["W"]
         W_prima = modelo_cargado["W_prima"]
@@ -113,27 +119,9 @@ def entrenar(configuracion_dict: dict) -> dict:
         historial_perdida = modelo_cargado["historial_perdida"]
         tamanio_vocabulario = len(vocabulario_palabras)
         estado_reanudacion = f"Reanudando desde checkpoint '{ruta_checkpoint}' (Época {epoca_inicial})"
-
-        print("\n[2/3] Tokenizando corpus de texto...")
-        tokens_corpus = tokenizar_corpus(
-            ruta_corpus=ruta_corpus,
-            incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
-        )
-        print(f"Tokens totales extraídos del corpus: {len(tokens_corpus):,}")
     else:
-        print("\n[1/4] Tokenizando corpus de texto...")
-        tokens_corpus = tokenizar_corpus(
-            ruta_corpus=ruta_corpus,
-            incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
-        )
-        print(f"Tokens totales extraídos del corpus: {len(tokens_corpus):,}")
-
         print("\n[2/4] Construyendo vocabulario de palabras...")
-        vocabulario_palabras = construir_vocabulario(
-            ruta_corpus=ruta_corpus,
-            incluir_puntuacion_y_numeros=incluir_puntuacion_y_numeros,
-            token_desconocido=token_desconocido,
-        )
+        vocabulario_palabras = construir_vocabulario(tokens_corpus)
         tamanio_vocabulario = len(vocabulario_palabras)
 
         W, W_prima = inicializar_pesos(
@@ -162,11 +150,12 @@ def entrenar(configuracion_dict: dict) -> dict:
     if not es_reanudacion:
         print("[3/4] Preparando representaciones matriciales del corpus...")
 
-    total_muestras = max(0, len(tokens_corpus) - (2 * tamanio_ventana))
+    C_int = 2 * tamanio_ventana
+    total_muestras = max(0, len(tokens_corpus) - C_int)
     cantidad_lotes = int(np.ceil(total_muestras / tamanio_lote))
     print(f"Total de muestras: {total_muestras:,} distribuidas en {cantidad_lotes:,} lotes.")
 
-    cantidad_palabras_contexto = float(2 * tamanio_ventana)
+    cantidad_palabras_contexto = float(C_int)
     mapeo_vocabulario = {palabra: indice for indice, palabra in enumerate(vocabulario_palabras)}
 
     # 4. Bucle Principal de Entrenamiento por Épocas
@@ -185,7 +174,7 @@ def entrenar(configuracion_dict: dict) -> dict:
 
         for indice_lote in barra_progreso:
             posicion_inicio = indice_lote * tamanio_lote
-            posicion_fin = min(posicion_inicio + tamanio_lote + 2 * tamanio_ventana, len(tokens_corpus))
+            posicion_fin = min(posicion_inicio + tamanio_lote + C_int, len(tokens_corpus))
             subconjunto_tokens_lote = tokens_corpus[posicion_inicio:posicion_fin]
 
             matriz_contexto_x, matriz_objetivo_t = crear_matrices_lote(

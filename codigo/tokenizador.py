@@ -26,10 +26,10 @@ def tokenizar_corpus(
 
     if incluir_puntuacion_y_numeros:
         # Regex que captura secuencias alfanumericas o cualquier caracter de puntuacion no blanco
-        patron = re.compile(r"\w+|[^\w\s]", re.IGNORECASE)
+        patron = re.compile(r"\w+|[^\w\s]")
     else:
         # Regex que captura exclusivamente palabras alfabeticas con tildes y ñ
-        patron = re.compile(r"[a-záéíóúüñ]+", re.IGNORECASE)
+        patron = re.compile(r"[a-záéíóúüñ]+")
 
     tokens = patron.findall(contenido)
     if not tokens:
