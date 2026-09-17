@@ -33,6 +33,8 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
+> **Detección Automática de Hardware**: El módulo `codigo/modelo_cbow_cupy.py` detecta automáticamente la disponibilidad de GPU NVIDIA con CuPy / CUDA 12. Si no se detecta una GPU compatible, conmuta de forma transparente al motor de cómputo NumPy en CPU.
+
 ---
 
 ## 📁 Organización del Proyecto
@@ -44,11 +46,13 @@ cbow_nlp/
 ├── configuracion.yaml                      # Hiperparametros centralizados por defecto
 ├── entrenar.py                             # Script ejecutable por consola para entrenamiento local
 ├── TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb  # Notebook interactivo para analisis y evaluacion
+├── datos/                                  # Directorio del corpus de texto (ej. corpus.txt)
+├── respaldos/                              # Directorio de copias de seguridad de modelos (.npz)
 └── codigo/                                 # Modulos Python reutilizables
     ├── __init__.py                         # Identificador del paquete de Python
     ├── configuracion.py                    # Carga y guardado de hiperparametros YAML
     ├── tokenizador.py                      # Tokenizacion por Palabra (Regex)
-    ├── generador_vocabulario.py            # Construccion del vocabulario y matrices One-Hot (x y t)
+    ├── generador_vocabulario.py            # Construccion del vocabulario y mapeos
     ├── modelo_cbow_cupy.py                 # Red CBOW matricial acelerada por GPU (CuPy / NumPy)
     └── entrenador_cbow.py                  # Bucle de entrenamiento por lotes y resguardos
 ```
@@ -70,22 +74,28 @@ Para entrenar el modelo con tu propio corpus de texto o con el archivo provisto 
    ```
 
 ### 2. Parámetros Principales de Entrenamiento
-- **`incluir_puntuacion_y_numeros`**: Incluir signos de puntuación y números en la tokenización (`true` o `false`).
-- **`tamanio_ventana`**: Tamaño de la ventana de contexto $C/2$ a izquierda y a derecha (ej. `5` para un contexto total $C = 10$).
-- **`dimension_embedding`**: Dimensión de la capa oculta o vector de embedding $N$ (ej. `100`).
-- **`tasa_aprendizaje`**: Tasa de aprendizaje $\eta$ para la actualización de gradientes (ej. `0.2`).
-- **`cantidad_epocas`**: Número total de épocas de entrenamiento (ej. `10`).
+- **`incluir_puntuacion_y_numeros`**: Incluir signos de puntuación y números en la tokenización (`true` o `false`, por defecto: `true`).
+- **`tamanio_ventana`**: Tamaños de ventana de contexto $m$ a cada lado de la palabra objetivo (por defecto: `4` para $m = 4$ con $C = 8$ palabras contextuales totales; se evalúa también $m = 5$ para $C = 10$).
+- **`dimension_embedding`**: Dimensión de la capa oculta o vector de embedding $N$ (por defecto: `100`).
+- **`tasa_aprendizaje`**: Tasa de aprendizaje $\eta$ para la actualización de gradientes (por defecto: `0.3`).
+- **`cantidad_epocas`**: Número total de épocas de entrenamiento a ejecutar (por defecto: `500`).
+- **`frecuencia_respaldo`**: Frecuencia en épocas para guardar respaldos automáticos `.npz` (por defecto: `100`).
+- **`semilla_aleatoria`**: Semilla para garantizar reproducibilidad en la inicialización de pesos (por defecto: `26`).
 
 ### 3. Modelo de Salida: Softmax Completo
-El modelo calcula las probabilidades Softmax sobre la totalidad del vocabulario $|V|$:
-- Salida: $y = \text{softmax}(u) \in \mathbb{R}^{B \times |V|}$.
-- Error: $e = y - t \in \mathbb{R}^{B \times |V|}$.
-- Pérdida: $E = -\log(y_{\text{objetivo}})$.
+El modelo calcula las probabilidades Softmax sobre la totalidad del vocabulario $|V|$ para cada mini-lote de tamaño $L$:
+- Activación de la capa oculta: $h = \frac{1}{C} x W \in \mathbb{R}^{L \times N}$
+- Puntuación de salida: $u = h W' \in \mathbb{R}^{L \times |V|}$
+- Probabilidades de salida: $y = \text{softmax}(u) \in \mathbb{R}^{L \times |V|}$
+- Vector de error: $e = y - t \in \mathbb{R}^{L \times |V|}$
+- Pérdida Cross-Entropy promedio: $E = -\frac{1}{L} \sum_{l=1}^L \log(y_{l, \text{objetivo}} + 1e-12)$
 
-### 4. Tamaño de Lote (Batch Size)
-El parámetro `tamanio_lote` se configura preferentemente en potencias de 2 (ej. `512`, `1024`, `2048`, `4096`) para maximizar el aprovechamiento del paralelismo matricial en la GPU.
+donde $W \in \mathbb{R}^{|V| \times N}$ es la matriz de pesos de entrada y $W' \in \mathbb{R}^{N \times |V|}$ es la matriz de pesos de salida.
 
-#### Sugerencias de `tamanio_lote` según la VRAM de la GPU:
+### 4. Tamaño de Lote (Batch Size $L$)
+El parámetro `tamanio_lote` ($L$) se configura preferentemente en potencias de 2 (ej. `512`, `1024`, `2048`, `4096`) para maximizar el aprovechamiento del paralelismo matricial en la GPU.
+
+#### Sugerencias de `tamanio_lote` ($L$) según la VRAM de la GPU:
 
 | VRAM de la GPU | Tamaño de Lote Recomendado (`tamanio_lote`) | Consideraciones |
 | :--- | :---: | :--- |
@@ -100,20 +110,30 @@ El parámetro `tamanio_lote` se configura preferentemente en potencias de 2 (ej.
 ### 1. Entrenamiento Local por Consola
 Para ejecutar el pipeline de entrenamiento desde la terminal:
 ```bash
-# Ejecutar entrenamiento con la configuracion por defecto
+# Ejecutar entrenamiento con la configuracion por defecto (configuracion.yaml)
 uv run python entrenar.py
 
-# O bien especificando parametros de consola
-uv run python entrenar.py --epocas 10 --lote 2048 --tasa 0.2
+# Especificando parametros y sobrescrituras por consola
+uv run python entrenar.py --config configuracion.yaml --epocas 500 --lote 2048 --tasa 0.3
 ```
+
+#### Opciones de Línea de Comandos (CLI):
+- `--config`: Ruta al archivo YAML de configuración (por defecto: `configuracion.yaml`).
+- `--epocas`: Cantidad de épocas de entrenamiento a ejecutar.
+- `--lote`: Tamaño del mini-lote $L$.
+- `--tasa`: Tasa de aprendizaje $\eta$.
+- `--reanudar`: Activa el modo de reanudación desde un checkpoint `.npz`.
+- `--checkpoint`: Ruta al archivo `.npz` desde el cual reanudar.
+
 Al finalizar, se guardará automáticamente la copia de respaldo `.npz` en la carpeta `respaldos/`.
 
 ### 2. Análisis y Evaluación en Jupyter Notebook
 Abre el notebook `TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb` para:
-1. Cargar modelos resguardados `.npz`.
-2. Graficar las curvas de pérdida por época.
-3. Buscar palabras más similares mediante producto interno o similaridad de coseno sobre la matriz $W$.
-4. Comparar curvas de entrenamiento entre distintos experimentos.
+1. **Distribución del Corpus**: Extraer el vocabulario y analizar la frecuencia de tokens.
+2. **Carga e Inspección de Checkpoints**: Cargar modelos resguardados `.npz` e inspeccionar su configuración.
+3. **Gráficos de Pérdida**: Visualizar las curvas de pérdida por época individual o comparar múltiples experimentos ($m=4$ vs $m=5$, con y sin puntuación).
+4. **Búsqueda de Similaridad**: Encontrar las palabras más similares mediante producto interno o similaridad de coseno sobre la matriz de embeddings $W$.
+5. **Evaluación de Analogías**: Evaluar relaciones semánticas vectoriales mediante la operación $v_A - v_B + v_C \approx v_D$ (ejemplo: `evaluar_analogia("padre", "hombre", "mujer", ...)`).
 
 ---
 
@@ -122,7 +142,7 @@ Abre el notebook `TP1_CBOW_Procesamiento_Lenguaje_Natural.ipynb` para:
 Para continuar entrenando un modelo existente a partir de una copia de seguridad en formato `.npz`:
 
 ```bash
-uv run python entrenar.py --reanudar --checkpoint respaldos/modelo_cbow_w5_epoca_10.npz --epocas 5
+uv run python entrenar.py --reanudar --checkpoint respaldos/modelo_cbow_m4_epoca_500_con_puntuacion.npz --epocas 100
 ```
 
 Al reanudar, se restaurarán las matrices de pesos $W$ y $W'$, el vocabulario de palabras, la época actual y el historial de pérdida acumulado.
